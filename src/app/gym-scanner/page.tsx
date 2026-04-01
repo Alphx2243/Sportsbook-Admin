@@ -75,7 +75,7 @@ export default function GymScannerPage() {
                                 <input
                                     type="text"
                                     value={userId}
-                                    onChange={(e) => setUserId(e.target.value)}
+                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUserId(e.target.value)}
                                     placeholder="Enter or scan ID..."
                                     className="w-full pl-10 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all text-foreground"
                                     disabled={isProcessing}

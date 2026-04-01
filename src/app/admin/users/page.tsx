@@ -19,12 +19,13 @@ import {
   Key
 } from 'lucide-react'
 import { getAllUsers, updateUserRole, deleteUser, createUser } from '@/actions/admin'
+import { User } from '@/interfaces'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
 
 export default function UsersManagement() {
-  const [users, setUsers] = useState<any[]>([])
+  const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [processingId, setProcessingId] = useState<string | null>(null)
@@ -213,7 +214,7 @@ export default function UsersManagement() {
                           placeholder="+91 9876543210"
                           value={newUserData.phone}
                           
-                          onChange={(e) => setNewUserData({ ...newUserData, phone: e.target.value })}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewUserData({ ...newUserData, phone: e.target.value })}
                         />
                       </div>
                     </div>
@@ -227,7 +228,7 @@ export default function UsersManagement() {
                           placeholder="2024101"
                           value={newUserData.rollNumber}
                           
-                          onChange={(e) => setNewUserData({ ...newUserData, rollNumber: e.target.value })}
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewUserData({ ...newUserData, rollNumber: e.target.value })}
                         />
                       </div>
                     </div>
@@ -243,7 +244,7 @@ export default function UsersManagement() {
                         placeholder="••••••••"
                         value={newUserData.password}
                         
-                        onChange={(e) => setNewUserData({ ...newUserData, password: e.target.value })}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewUserData({ ...newUserData, password: e.target.value })}
                       />
                     </div>
                   </div>

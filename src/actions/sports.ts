@@ -80,7 +80,7 @@ export async function getSports(): Promise<ActionResponse<{ documents: any[], to
 export async function getSportAnalytics(sportName: string): Promise<ActionResponse> {
     try {
         const today = new Date();
-        const dates = Array.from({ length: 7 }, (_, i) => {
+        const dates = Array.from({ length: 7 }, (_: unknown, i: number) => {
             const d = new Date(today);
             d.setDate(today.getDate() - (6 - i));
             return d.toISOString().split('T')[0];
@@ -94,22 +94,22 @@ export async function getSportAnalytics(sportName: string): Promise<ActionRespon
         });
 
         const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-        const weeklyAttendance = dates.map(date => {
+        const weeklyAttendance = dates.map((date: string) => {
             const dateObj = new Date(date);
             const dayName = days[dateObj.getDay()];
-            const dayBookings = bookings.filter(b => b.date === date);
-            const totalPlayers = dayBookings.reduce((sum, b) => sum + (b.numberOfPlayers || 0), 0);
+            const dayBookings = bookings.filter((b: any) => b.date === date);
+            const totalPlayers = dayBookings.reduce((sum: number, b: any) => sum + (b.numberOfPlayers || 0), 0);
             return { day: dayName, Students: totalPlayers };
         });
 
         const timeSlots = ["06-08", "08-10", "10-12", "12-14", "14-16", "16-18", "18-20", "20-22"];
-        const peakHours = timeSlots.map(slot => {
+        const peakHours = timeSlots.map((slot: string) => {
             const [startHour, endHour] = slot.split('-').map(Number);
-            const slotBookings = bookings.filter(b => {
+            const slotBookings = bookings.filter((b: any) => {
                 const hour = parseInt(b.startTime.split(':')[0]);
                 return hour >= startHour && hour < endHour;
             });
-            const totalUsersInSlot = slotBookings.reduce((sum, b) => sum + (b.numberOfPlayers || 0), 0);
+            const totalUsersInSlot = slotBookings.reduce((sum: number, b: any) => sum + (b.numberOfPlayers || 0), 0);
             return { time: slot, Users: Math.round(totalUsersInSlot / 7) };
         });
 

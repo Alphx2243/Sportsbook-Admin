@@ -214,7 +214,7 @@ export default function BookingScannerPage() {
                                     <input 
                                         type="text" 
                                         value={manualId}
-                                        onChange={(e) => setManualId(e.target.value)}
+                                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setManualId(e.target.value)}
                                         placeholder="Enter Booking ID manually..."
                                         className="w-full pl-12 pr-4 py-4 bg-white/5 border border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all font-bold"
                                     />
