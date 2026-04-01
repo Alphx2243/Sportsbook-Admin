@@ -4,10 +4,10 @@ import { ActionResponse } from '@/interfaces'
 
 export async function handleGymScan(userId: string): Promise<ActionResponse> {
     try {
-        return await prisma.$transaction<ActionResponse>(async (tx: any) => {
+        return await prisma.$transaction(async (tx: any) => {
             const [user]: any = await tx.$queryRaw`SELECT id, name FROM "User" WHERE id = ${userId} FOR UPDATE`;
             if (!user) {
-                return { success: false, error: 'User not found' };
+                return { success: false, error: 'User not found' } as ActionResponse;
             }
 
             const activeLog = await tx.gymLog.findFirst({
@@ -33,7 +33,7 @@ export async function handleGymScan(userId: string): Promise<ActionResponse> {
                         duration: durationHours,
                         log: updatedLog
                     }
-                };
+                } as ActionResponse;
             } else {
                 const newLog = await tx.gymLog.create({
                     data: { userId: userId, entryTime: new Date() }
@@ -46,7 +46,7 @@ export async function handleGymScan(userId: string): Promise<ActionResponse> {
                         user: user.name,
                         log: newLog
                     }
-                };
+                } as ActionResponse;
             }
         });
     }
@@ -62,22 +62,22 @@ export async function getGymStats(userId: string): Promise<ActionResponse> {
             where: { userId }, orderBy: { entryTime: 'desc' }
         })
 
-        const completedLogs = logs.filter(log => log.exitTime !== null)
+        const completedLogs = logs.filter((log: any) => log.exitTime !== null)
 
-        const totalHours = completedLogs.reduce((acc, log) => acc + (log.duration || 0), 0)
+        const totalHours = completedLogs.reduce((acc: number, log: any) => acc + (log.duration || 0), 0)
         const weekAgo = new Date()
         weekAgo.setDate(weekAgo.getDate() - 7)
 
         const weeklyHours = completedLogs
-            .filter(log => new Date(log.entryTime) >= weekAgo).reduce((acc, log) => acc + (log.duration || 0), 0)
+            .filter((log: any) => new Date(log.entryTime) >= weekAgo).reduce((acc: number, log: any) => acc + (log.duration || 0), 0)
 
         return {
             success: true,
             data: {
-                totalHours: totalHours.toFixed(1),
-                weeklyHours: weeklyHours.toFixed(1),
+                totalHours: (totalHours || 0).toFixed(1),
+                weeklyHours: (weeklyHours || 0).toFixed(1),
                 sessionsCount: logs.length,
-                history: logs.slice(0, 10).map(log => ({
+                history: logs.slice(0, 10).map((log: any) => ({
                     id: log.id, date: new Date(log.entryTime).toLocaleDateString(),
                     entryTime: new Date(log.entryTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                     exitTime: log.exitTime ? new Date(log.exitTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'In Progress',
