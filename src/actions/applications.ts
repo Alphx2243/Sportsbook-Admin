@@ -35,7 +35,7 @@ export async function createApplication(data: any): Promise<ActionResponse> {
             },
         })
         revalidatePath('/')
-        // Notify socket of new application
+        
         await notifySocketUpdate(data.sportname, 'availability_changed');
         return { success: true, data: application }
     }
@@ -64,7 +64,7 @@ export async function deleteApplication(id: string): Promise<ActionResponse> {
             where: { id },
         })
         revalidatePath('/')
-        // Notify socket of application removal
+        
         await notifySocketUpdate(application.sportName, 'availability_changed');
         return { success: true, data: null }
     } catch (error: any) {

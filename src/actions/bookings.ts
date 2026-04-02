@@ -391,6 +391,8 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
     }
 }
 
+import { getISTDate, formatISTTime } from '@/lib/utils';
+
 export async function activateBooking(bookingId: string) {
     try {
         const result = await prisma.$transaction(async (tx: any) => {
@@ -404,12 +406,11 @@ export async function activateBooking(bookingId: string) {
             const end = new Date(`${booking.endDate && booking.endDate !== booking.date ? '2000-01-02' : dummyDate}T${booking.endTime}`);
             const durationMs = end.getTime() - start.getTime();
 
-            const now = new Date();
-            const newStartTime = now.toTimeString().split(' ')[0];
-            const newEndDate = new Date(now.getTime() + durationMs);
-            const newEndTime = newEndDate.toTimeString().split(' ')[0];
-            const newEndDateStr = newEndDate.toISOString().split('T')[0];
-            const newDateStr = now.toISOString().split('T')[0];
+            const istNow = getISTDate();
+            const { time: newStartTime, date: newDateStr } = formatISTTime(istNow);
+            
+            const istEnd = new Date(istNow.getTime() + durationMs);
+            const { time: newEndTime, date: newEndDateStr } = formatISTTime(istEnd);
 
             return await tx.booking.update({
                 where: { id: bookingId },
