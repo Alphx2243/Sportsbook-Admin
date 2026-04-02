@@ -8,30 +8,40 @@ import { ensureAdmin } from '@/lib/auth-utils'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
-    console.log(`Notifying socket server at ${url} for sport: ${sportName} (Type: ${type})`);
+    const secret = process.env.SOCKET_INTERNAL_SECRET || 'your_default_secure_secret_here';
+
+    console.log(`[SOCKET] Notifying ${url} for ${sportName} (Type: ${type})`);
     try {
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-socket-secret': secret
+            },
             body: JSON.stringify({ sportName, type }),
         });
-        console.log(`Socket server response: ${response.status} ${response.statusText}`);
+        if (!response.ok) console.error(`[SOCKET] Server returned ${response.status}`);
     } catch (error) {
-        console.error('Failed to notify socket server:', error);
+        console.error('[SOCKET] Failed to notify server:', error);
     }
 }
 
 async function notifyMatchesUpdate() {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-matches`;
-    console.log(`Notifying socket server at ${url} for matches update`);
+    const secret = process.env.SOCKET_INTERNAL_SECRET || 'your_default_secure_secret_here';
+
+    console.log(`[SOCKET] Notifying ${url} for matches update`);
     try {
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-socket-secret': secret
+            },
         });
-        console.log(`Socket server response: ${response.status} ${response.statusText}`);
+        if (!response.ok) console.error(`[SOCKET] Server returned ${response.status}`);
     } catch (error) {
-        console.error('Failed to notify socket server for matches:', error);
+        console.error('[SOCKET] Failed to notify matches server:', error);
     }
 }
 

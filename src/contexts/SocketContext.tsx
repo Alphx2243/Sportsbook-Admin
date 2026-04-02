@@ -22,13 +22,15 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     
     const socketInstance = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005', {
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
       autoConnect: true,
+      transports: ['websocket'], 
+      upgrade: false, 
     });
 
     socketInstance.on('connect', () => {
-      console.log('Successfully connected to socket server:', socketInstance.id);
+      console.log('[SOCKET] Connected:', socketInstance.id, 'via', socketInstance.io.engine.transport.name);
       setIsConnected(true);
     });
 
