@@ -4,6 +4,25 @@ import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/interfaces'
 
+async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
+    const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
+    const secret = process.env.SOCKET_INTERNAL_SECRET || 'your_default_secure_secret_here';
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-socket-secret': secret
+            },
+            body: JSON.stringify({ sportName, type }),
+        });
+        if (!response.ok) console.error(`[SOCKET] Server returned ${response.status}`);
+    } catch (error) {
+        console.error('[SOCKET] Failed to notify server:', error);
+    }
+}
+
 export async function createSport(data: any): Promise<ActionResponse> {
     try {
         const sport = await prisma.sport.create({
@@ -15,6 +34,7 @@ export async function createSport(data: any): Promise<ActionResponse> {
             },
         })
         revalidatePath('/')
+        await notifySocketUpdate(sport.name);
         return { success: true, data: sport }
     }
     catch (error: any) {
@@ -36,6 +56,7 @@ export async function updateSport(id: string, data: any): Promise<ActionResponse
             },
         })
         revalidatePath('/')
+        await notifySocketUpdate(sport.name);
         return { success: true, data: sport }
     }
     catch (error: any) {
@@ -45,8 +66,9 @@ export async function updateSport(id: string, data: any): Promise<ActionResponse
 }
 export async function deleteSport(id: string): Promise<ActionResponse> {
     try {
-        await prisma.sport.delete({ where: { id }, })
+        const sport = await prisma.sport.delete({ where: { id }, })
         revalidatePath('/')
+        await notifySocketUpdate(sport.name);
         return { success: true, data: null }
     }
     catch (error: any) {

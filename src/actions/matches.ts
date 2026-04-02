@@ -1,7 +1,26 @@
 'use server'
+
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/interfaces'
+
+async function notifyMatchesUpdate() {
+    const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-matches`;
+    const secret = process.env.SOCKET_INTERNAL_SECRET || 'your_default_secure_secret_here';
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-socket-secret': secret
+            },
+        });
+        if (!response.ok) console.error(`[SOCKET] Server returned ${response.status}`);
+    } catch (error) {
+        console.error('[SOCKET] Failed to notify matches server:', error);
+    }
+}
 
 export async function createMatch(data: any): Promise<ActionResponse> {
     try {
@@ -13,6 +32,7 @@ export async function createMatch(data: any): Promise<ActionResponse> {
             },
         })
         revalidatePath('/live-scores')
+        await notifyMatchesUpdate();
         return { success: true, data: match }
     }
     catch (error: any) {
@@ -49,6 +69,7 @@ export async function updateMatch(id: string, data: any): Promise<ActionResponse
             },
         })
         revalidatePath('/live-scores')
+        await notifyMatchesUpdate();
         return { success: true, data: match }
     }
     catch (error: any) {
@@ -61,6 +82,7 @@ export async function deleteMatch(id: string): Promise<ActionResponse> {
     try {
         await prisma.match.delete({ where: { id }, })
         revalidatePath('/live-scores')
+        await notifyMatchesUpdate();
         return { success: true, data: null }
     }
     catch (error: any) {
