@@ -21,7 +21,14 @@ export const SocketProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     
-    const socketInstance = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005', {
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL;
+    
+    if (!socketUrl && process.env.NODE_ENV === 'production') {
+      console.warn('[SOCKET] NEXT_PUBLIC_SOCKET_URL is missing. Socket connection disabled in production.');
+      return;
+    }
+
+    const socketInstance = io(socketUrl || 'http://localhost:3005', {
       reconnectionAttempts: 10,
       reconnectionDelay: 2000,
       autoConnect: true,

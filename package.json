@@ -8,8 +8,7 @@
     "socket": "cd socket-servers && npm run dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "inst": "npm install prisma lucide-react framer-motion recharts uuid nodemailer bcryptjs cloudinary jose pg @prisma/adapter-pg @prisma/client next dotenv tailwindcss @tailwindcss/postcss eslint eslint-config-next @eslint/eslintrc"
+    "lint": "next lint"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.4.0",
