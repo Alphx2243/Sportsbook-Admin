@@ -1,7 +1,7 @@
 'use client'
 import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { getCurrentUser, login as loginAction, logout as logoutAction } from '@/actions/auth';
-import { ActionResponse } from '@/interfaces';
+import { ActionResponse } from '@/types/interfaces';
 
 interface User {
   id: string;

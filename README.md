@@ -10,6 +10,9 @@ The **SportsBook Admin Portal** is a management dashboard (Created in **Next.js 
 ### Facility & Booking Oversight
 *   **Approval System**: Manage court bookings and equipment returns.
 
+### Security
+*   **Rate Limiting**: Global and per-IP rate limiting is enforced via Next.js Middleware (30 requests/min per IP, 500/min total globally) to ensure dashboard stability.
+
 ## The Tech Stack
 | Layer | Technology |
 | :--- | :--- |

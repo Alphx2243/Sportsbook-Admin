@@ -1,11 +1,8 @@
 import "./globals.css";
 import Navbar from "@/components/Header";
-import Footer from "@/components/Footer";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ToastProvider } from "@/contexts/ToastContext";
-import { SportsProvider } from "@/contexts/SportsContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
-import { SocketProvider } from "@/contexts/SocketContext";
 import { Outfit } from "next/font/google";
 
 const outfit = Outfit({ subsets: ["latin"] });
@@ -21,15 +18,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${outfit.className} antialiased`}>
         <ToastProvider>
           <AuthProvider>
-            <SocketProvider>
-              <SportsProvider>
-                <ThemeProvider>
-                  <Navbar />
-                  <main>{children}</main>
-                  <Footer />
-                </ThemeProvider>
-              </SportsProvider>
-            </SocketProvider>
+            <ThemeProvider>
+              <Navbar />
+              <main>{children}</main>
+            </ThemeProvider>
           </AuthProvider>
         </ToastProvider>
       </body>

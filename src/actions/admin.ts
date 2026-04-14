@@ -3,7 +3,7 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import bcrypt from 'bcryptjs'
-import type { ActionResponse } from '@/interfaces'
+import type { ActionResponse } from '@/types/interfaces'
 import { ensureAdmin } from '@/lib/auth-utils'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {

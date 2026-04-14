@@ -26,14 +26,13 @@ export default function BookingManagement() {
    const [filter, setFilter] = useState('returned')
    const [processingId, setProcessingId] = useState<string | null>(null)
 
-   const fetchBookings = async () => {
-      setLoading(true)
-      const res = await getBookings({ status: filter === 'all' ? undefined : filter })
-      if (res.success) setBookings(res.data.documents)
-      setLoading(false)
-   }
-
    useEffect(() => {
+      const fetchBookings = async () => {
+         setLoading(true)
+         const res = await getBookings({ status: filter === 'all' ? undefined : filter })
+         if (res.success) setBookings(res.data.documents)
+         setLoading(false)
+      }
       fetchBookings()
    }, [filter])
 

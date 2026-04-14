@@ -53,7 +53,7 @@ export default function AdminDashboard() {
       hidden: { opacity: 0, y: 20 },
       show: { opacity: 1, y: 0 }
    }
-   console.log(stats)
+   
    return (
       <motion.div
          variants={container}

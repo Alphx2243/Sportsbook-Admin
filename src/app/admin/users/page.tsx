@@ -19,7 +19,7 @@ import {
   Key
 } from 'lucide-react'
 import { getAllUsers, updateUserRole, deleteUser, createUser } from '@/actions/admin'
-import { User } from '@/interfaces'
+import { User } from '@/types/interfaces'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'

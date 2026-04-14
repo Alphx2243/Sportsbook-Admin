@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs'
 import { SignJWT, jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
 import { v4 as uuidv4 } from 'uuid'
-import { ActionResponse } from '@/interfaces'
+import { ActionResponse } from '@/types/interfaces'
 
 const SECRET_KEY = new TextEncoder().encode(process.env.JWT_SECRET || 'supersecretkey123')
 

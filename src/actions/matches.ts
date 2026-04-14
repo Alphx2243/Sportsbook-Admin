@@ -2,7 +2,7 @@
 
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
-import { ActionResponse } from '@/interfaces'
+import { ActionResponse } from '@/types/interfaces'
 
 async function notifyMatchesUpdate() {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-matches`;
