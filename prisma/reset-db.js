@@ -29,45 +29,59 @@ async function main() {
         {
             name: 'Badminton',
             numberOfCourts: 3,
-            totalEquipments: ['Racket:20', 'Shuttle:50'],
-            equipmentsInUse: ['Racket:0', 'Shuttle:0'],
             courtsInUse: 0,
             numPlayers: 0,
             courtData: ['Court 1:0', 'Court 2:0', 'Court 3:0'],
+            equipments: {
+                create: [
+                    { name: 'Racket', total: 20 },
+                    { name: 'Shuttle', total: 50 }
+                ]
+            }
         },
         {
             name: 'Squash',
             numberOfCourts: 2,
-            totalEquipments: ['Racket:10', 'Ball:20'],
-            equipmentsInUse: ['Racket:0', 'Ball:0'],
             courtsInUse: 0,
             numPlayers: 0,
             courtData: ['Court 1:0', 'Court 2:0'],
+            equipments: {
+                create: [
+                    { name: 'Racket', total: 10 },
+                    { name: 'Ball', total: 20 }
+                ]
+            }
         },
         {
             name: 'Table Tennis',
             numberOfCourts: 4,
-            totalEquipments: ['Racket:20', 'Ball:50'],
-            equipmentsInUse: ['Racket:0', 'Ball:0'],
             courtsInUse: 0,
             numPlayers: 0,
             courtData: ['Table 1:0', 'Table 2:0', 'Table 3:0', 'Table 4:0'],
+            equipments: {
+                create: [
+                    { name: 'Racket', total: 20 },
+                    { name: 'Ball', total: 50 }
+                ]
+            }
         },
         {
             name: 'Tennis',
             numberOfCourts: 2,
-            totalEquipments: ['Racket:15', 'Ball:40'],
-            equipmentsInUse: ['Racket:0', 'Ball:0'],
             courtsInUse: 0,
             numPlayers: 0,
             courtData: ['Court 1:0', 'Court 2:0'],
+            equipments: {
+                create: [
+                    { name: 'Racket', total: 15 },
+                    { name: 'Ball', total: 40 }
+                ]
+            }
         },
         {
             name: 'Swimming',
             numberOfCourts: 1,
-            totalEquipments: [],
             maxCapacity: 20,
-            equipmentsInUse: [],
             courtsInUse: 0,
             numPlayers: 0,
             courtData: ['RPool:0'],
@@ -76,8 +90,6 @@ async function main() {
             name: 'Gym',
             numberOfCourts: 1,
             maxCapacity: 50,
-            totalEquipments: [],
-            equipmentsInUse: [],
             courtsInUse: 0,
             numPlayers: 0,
             courtData: ['Main Gym:0'],

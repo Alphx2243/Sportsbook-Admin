@@ -3,6 +3,7 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/types/interfaces'
+import { v4 as uuidv4 } from 'uuid'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
@@ -12,7 +13,7 @@ async function notifySocketUpdate(sportName: string, type: string = 'availabilit
     try {
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 
+            headers: {
                 'Content-Type': 'application/json',
                 'x-socket-secret': secret
             },
@@ -26,33 +27,73 @@ async function notifySocketUpdate(sportName: string, type: string = 'availabilit
 
 export async function createBooking(data: any): Promise<ActionResponse> {
     try {
-        const existingBooking = await prisma.booking.findFirst({
-            where: {
-                userId: data.userId,
-                status: { in: ['pending', 'active', 'returned'] }
+        const result = await prisma.$transaction(async (tx: any) => {
+            const existingBooking = await tx.booking.findFirst({
+                where: {
+                    userId: data.userId,
+                    status: { in: ['pending', 'active', 'returned'] }
+                }
+            })
+
+            if (existingBooking) {
+                const msg = existingBooking.status === 'active'
+                    ? 'User already has an active booking.'
+                    : 'Previous session return is pending admin approval.';
+                throw new Error(`${msg} Please return items and wait for admin approval first.`)
             }
-        })
 
-        if (existingBooking) {
-            const msg = existingBooking.status === 'active'
-                ? 'You already have an active booking.'
-                : 'Your previous session return is pending admin approval.';
-            return { success: false, error: `${msg} Please return items and wait for admin approval first.` }
-        }
+            const bookingEquipmentData = [];
+            if (data.equipmentsIssued && data.equipmentsIssued.length > 0) {
+                // Fetch the sport to get IDs
+                const sport = await tx.sport.findUnique({
+                    where: { name: data.sportName }
+                });
+                if (!sport) throw new Error('Sport not found');
 
-        const booking = await prisma.booking.create({
-            data: {
-                userId: data.userId, sportName: data.sportName,
-                issuedEquipments: data.equipmentsIssued || [],
-                numberOfPlayers: parseInt(data.numberOfPlayers || 0),
-                startTime: data.startTime, endTime: data.endTime,
-                date: data.date, qrDetail: data.qrdetail,
-                status: data.status, endDate: data.enddate,
-                courtNo: data.CourtNo,
-            },
-        })
+                for (const issued of data.equipmentsIssued) {
+                    const [name, countStr] = issued.split(':');
+                    const issuedCount = parseInt(countStr);
+
+                    const equipment = await tx.equipment.findFirst({
+                        where: { sportId: sport.id, name: name.trim() }
+                    });
+
+                    if (!equipment) throw new Error(`Equipment ${name} not found.`);
+
+                    await tx.equipment.update({
+                        where: { id: equipment.id },
+                        data: { inUse: { increment: issuedCount } }
+                    });
+
+                    bookingEquipmentData.push({
+                        id: uuidv4(),
+                        equipmentId: equipment.id,
+                        count: issuedCount
+                    });
+                }
+            }
+
+            return await tx.booking.create({
+                data: {
+                    userId: data.userId,
+                    sportName: data.sportName,
+                    numberOfPlayers: parseInt(data.numberOfPlayers || 0),
+                    startTime: data.startTime,
+                    endTime: data.endTime,
+                    date: data.date,
+                    qrDetail: data.qrdetail,
+                    status: data.status,
+                    endDate: data.enddate,
+                    courtNo: data.CourtNo,
+                    BookingEquipment: {
+                        create: bookingEquipmentData
+                    }
+                },
+            })
+        });
+
         revalidatePath('/')
-        return { success: true, data: booking }
+        return { success: true, data: result }
     }
     catch (error: any) {
         console.error('Create booking error:', error)
@@ -66,7 +107,6 @@ export async function updateBooking(id: string, data: any): Promise<ActionRespon
             where: { id },
             data: {
                 userId: data.userId, sportName: data.sportName,
-                issuedEquipments: data.equipmentsIssued,
                 numberOfPlayers: data.numberOfPlayers ? parseInt(data.numberOfPlayers) : undefined,
                 startTime: data.startTime, endTime: data.endTime,
                 scanned: data.scanned, qrDetail: data.qrdetail,
@@ -118,7 +158,16 @@ export async function getBookings(filters: { userId?: string; status?: string; d
             where.endTime = { gt: filters.timeRange }
         }
         const bookings = await prisma.booking.findMany({
-            where, orderBy: { createdAt: 'desc' }, include: { user: true }
+            where,
+            orderBy: { createdAt: 'desc' },
+            include: {
+                user: true,
+                BookingEquipment: {
+                    include: {
+                        Equipment: true
+                    }
+                }
+            }
         })
         return { success: true, data: { documents: bookings, total: bookings.length } }
     }
@@ -131,7 +180,7 @@ export async function getBookings(filters: { userId?: string; status?: string; d
 export async function extendBooking(bookingId: string, extensionMinutes: number): Promise<ActionResponse> {
     try {
         const updatedBooking = await prisma.$transaction(async (tx: any) => {
-            
+
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
             if (!booking) throw new Error('Booking not found');
 
@@ -180,39 +229,24 @@ export async function expireBooking(bookingId: string): Promise<ActionResponse> 
                 data: { status: 'expired' }
             });
 
-            const [sport]: any = await tx.$queryRaw`SELECT * FROM "Sport" WHERE "name" = ${booking.sportName} FOR UPDATE`;
-            if (!sport) {
-                throw new Error('Associated Sport not found');
-            }
+            // Return equipment to inventory via normalized relational tables
+            const bookingEquipments = await tx.bookingEquipment.findMany({
+                where: { bookingId },
+                include: { Equipment: true }
+            });
 
-            
-            const issuedEq = booking.issuedEquipments || [];
-            let newEqInUse = [...(sport.equipmentsInUse || [])];
-            issuedEq.forEach((issued: any) => {
-                const [name, count] = issued.split(':');
-                const issuedCount = parseInt(count);
-                newEqInUse = newEqInUse.map((eq: any) => {
-                    const [eqName, eqCount] = eq.split(':');
-                    if (eqName === name) {
-                        const currentVal = parseInt(eqCount);
-                        return `${eqName}:${Math.max(0, currentVal - issuedCount)}`;
-                    }
-                    return eq;
+            for (const be of bookingEquipments) {
+                await tx.equipment.update({
+                    where: { id: be.equipmentId },
+                    data: { inUse: { decrement: be.count } }
                 });
-            });
-
-            await tx.sport.update({
-                where: { id: sport.id },
-                data: {
-                    equipmentsInUse: newEqInUse
-                }
-            });
+            }
         });
         revalidatePath('/')
         revalidatePath('/dashboard')
         revalidatePath('/book-court')
 
-        
+
         const [bookingForSport]: any = await prisma.$queryRaw`SELECT "sportName" FROM "Booking" WHERE "id" = ${bookingId}`;
         if (bookingForSport) {
             await notifySocketUpdate(bookingForSport.sportName, 'availability_changed');
@@ -239,7 +273,7 @@ export async function requestReturn(bookingId: string): Promise<ActionResponse> 
                 throw new Error('Associated Sport not found');
             }
 
-            
+
             const courtNo = booking.courtNo;
             let newCourtData = sport.courtData || [];
             newCourtData = newCourtData.map((item: any, i: number) => {
@@ -270,7 +304,7 @@ export async function requestReturn(bookingId: string): Promise<ActionResponse> 
         revalidatePath('/dashboard')
         revalidatePath('/book-court')
 
-        
+
         const [bookingForSport]: any = await prisma.$queryRaw`SELECT "sportName" FROM "Booking" WHERE "id" = ${bookingId}`;
         if (bookingForSport) {
             await notifySocketUpdate(bookingForSport.sportName, 'availability_changed');
@@ -334,31 +368,32 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
                     }
                 })
             }
+            const bookingEquipmentData = [];
             if (data.equipmentsIssued && data.equipmentsIssued.length > 0) {
-                let currentEqInUse = sport.equipmentsInUse || []
-                const newEqInUse = [...currentEqInUse]
+                for (const issued of data.equipmentsIssued) {
+                    const [name, countStr] = issued.split(':');
+                    const issuedCount = parseInt(countStr);
 
-                data.equipmentsIssued.forEach((issued: string) => {
-                    const [name, count] = issued.split(':')
-                    const issuedCount = parseInt(count)
+                    const equipment = await tx.equipment.findFirst({
+                        where: { sportId: sport.id, name: name.trim() }
+                    });
 
-                    const eqIndex = newEqInUse.findIndex((eq: string) => eq.startsWith(name + ':'))
-                    if (eqIndex !== -1) {
-                        const [eqName, eqCount] = newEqInUse[eqIndex].split(':')
-                        newEqInUse[eqIndex] = `${eqName}:${parseInt(eqCount) + issuedCount}`
+                    if (!equipment) throw new Error(`Equipment ${name} not found.`);
+                    if (equipment.total - equipment.inUse < issuedCount) {
+                        throw new Error(`Not enough ${name} available.`);
                     }
-                    else {
-                        newEqInUse.push(`${name}:${issuedCount}`)
-                    }
-                })
 
-                await tx.sport.update({
-                    where: { id: sport.id },
-                    data: {
-                        equipmentsInUse: newEqInUse,
-                        ...(isCapacityBased && { numPlayers: { increment: numPlayers } })
-                    }
-                })
+                    await tx.equipment.update({
+                        where: { id: equipment.id },
+                        data: { inUse: { increment: issuedCount } }
+                    });
+
+                    bookingEquipmentData.push({
+                        id: uuidv4(),
+                        equipmentId: equipment.id,
+                        count: issuedCount
+                    });
+                }
             }
             else if (isCapacityBased) {
                 await tx.sport.update({
@@ -368,19 +403,26 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
 
             const booking = await tx.booking.create({
                 data: {
-                    userId: data.userId, sportName: data.sportName,
-                    issuedEquipments: data.equipmentsIssued || [],
-                    numberOfPlayers: numPlayers, startTime: data.startTime,
-                    endTime: data.endTime, date: data.date,
-                    qrDetail: data.qrdetail, status: data.status,
-                    endDate: data.enddate, courtNo: data.CourtNo,
+                    userId: data.userId,
+                    sportName: data.sportName,
+                    numberOfPlayers: numPlayers,
+                    startTime: data.startTime,
+                    endTime: data.endTime,
+                    date: data.date,
+                    qrDetail: data.qrdetail,
+                    status: data.status,
+                    endDate: data.enddate,
+                    courtNo: data.CourtNo,
+                    BookingEquipment: {
+                        create: bookingEquipmentData
+                    }
                 },
             })
             return booking
         })
         revalidatePath('/')
 
-        
+
         await notifySocketUpdate(data.sportName, 'booking_status_changed');
 
         return { success: true, data: result }
@@ -400,7 +442,7 @@ export async function activateBooking(bookingId: string) {
             if (!booking) throw new Error('Booking not found');
             if (booking.status !== 'pending') throw new Error('Booking is not in pending state');
 
-            
+
             const dummyDate = '2000-01-01';
             const start = new Date(`${dummyDate}T${booking.startTime}`);
             const end = new Date(`${booking.endDate && booking.endDate !== booking.date ? '2000-01-02' : dummyDate}T${booking.endTime}`);
@@ -408,7 +450,7 @@ export async function activateBooking(bookingId: string) {
 
             const istNow = getISTDate();
             const { time: newStartTime, date: newDateStr } = formatISTTime(istNow);
-            
+
             const istEnd = new Date(istNow.getTime() + durationMs);
             const { time: newEndTime, date: newEndDateStr } = formatISTTime(istEnd);
 
@@ -426,7 +468,7 @@ export async function activateBooking(bookingId: string) {
         });
 
         revalidatePath('/admin/bookings');
-        
+
         await notifySocketUpdate(result.sportName, 'availability_changed');
 
         return { success: true, data: result };

@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import bcrypt from 'bcryptjs'
 import type { ActionResponse } from '@/types/interfaces'
 import { ensureAdmin } from '@/lib/auth-utils'
+import { v4 as uuidv4 } from 'uuid'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
@@ -14,7 +15,7 @@ async function notifySocketUpdate(sportName: string, type: string = 'availabilit
     try {
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 
+            headers: {
                 'Content-Type': 'application/json',
                 'x-socket-secret': secret
             },
@@ -34,7 +35,7 @@ async function notifyMatchesUpdate() {
     try {
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 
+            headers: {
                 'Content-Type': 'application/json',
                 'x-socket-secret': secret
             },
@@ -148,36 +149,26 @@ export async function approveReturn(bookingId: string): Promise<ActionResponse> 
                 throw new Error('Associated Sport not found');
             }
 
-            
-            const issuedEq = booking.issuedEquipments || [];
-            let newEqInUse = [...(sport.equipmentsInUse || [])];
-            issuedEq.forEach((issued: any) => {
-                const [name, count] = issued.split(':');
-                const issuedCount = parseInt(count);
-                newEqInUse = newEqInUse.map((eq: any) => {
-                    const [eqName, eqCount] = eq.split(':');
-                    if (eqName === name) {
-                        const currentVal = parseInt(eqCount);
-                        return `${eqName}:${Math.max(0, currentVal - issuedCount)}`;
-                    }
-                    return eq;
-                });
-            });
-
-            await tx.sport.update({
-                where: { id: sport.id },
-                data: { equipmentsInUse: newEqInUse }
-            });
-
             await tx.booking.update({
                 where: { id: bookingId },
                 data: { status: 'expired' }
             });
+
+            const bookingEquipments = await tx.bookingEquipment.findMany({
+                where: { bookingId }
+            });
+
+            for (const be of bookingEquipments) {
+                await tx.equipment.update({
+                    where: { id: be.equipmentId },
+                    data: { inUse: { decrement: be.count } }
+                });
+            }
         });
 
         revalidatePath('/admin/bookings')
         revalidatePath('/dashboard')
-        
+
         const booking: any = await prisma.booking.findUnique({ where: { id: bookingId } })
         if (booking) {
             await notifySocketUpdate(booking.sportName, 'availability_changed');
@@ -193,16 +184,55 @@ export async function approveReturn(bookingId: string): Promise<ActionResponse> 
 export async function updateSportInventory(sportId: string, data: any): Promise<ActionResponse> {
     try {
         await ensureAdmin();
-        await prisma.sport.update({
-            where: { id: sportId },
-            data: {
-                numberOfCourts: data.numberOfCourts !== undefined ? parseInt(data.numberOfCourts) : undefined,
-                totalEquipments: data.totalEquipments,
-                maxCapacity: data.maxCapacity !== undefined ? parseInt(data.maxCapacity) : undefined,
-                courtsInUse: data.courtsInUse !== undefined ? parseInt(data.courtsInUse) : undefined,
-                numPlayers: data.numPlayers !== undefined ? parseInt(data.numPlayers) : undefined,
+        await prisma.$transaction(async (tx: any) => {
+            await tx.sport.update({
+                where: { id: sportId },
+                data: {
+                    numberOfCourts: data.numberOfCourts !== undefined ? parseInt(data.numberOfCourts) : undefined,
+                    maxCapacity: data.maxCapacity !== undefined ? parseInt(data.maxCapacity) : undefined,
+                    courtsInUse: data.courtsInUse !== undefined ? parseInt(data.courtsInUse) : undefined,
+                    numPlayers: data.numPlayers !== undefined ? parseInt(data.numPlayers) : undefined,
+                }
+            })
+
+            if (data.totalEquipments) {
+                const existingEqs = await tx.equipment.findMany({ where: { sportId } });
+                const incomingEqs = data.totalEquipments.map((eq: string) => {
+                    const [name, total] = eq.split(':');
+                    return { name: name.trim(), total: parseInt(total) || 0 };
+                });
+
+                const incomingNames = incomingEqs.map((e: any) => e.name);
+                await tx.equipment.deleteMany({
+                    where: {
+                        sportId,
+                        name: { notIn: incomingNames }
+                    }
+                });
+
+                for (const eq of incomingEqs) {
+                    const existing = existingEqs.find((e: any) => e.name === eq.name);
+                    if (existing) {
+                        await tx.equipment.update({
+                            where: { id: existing.id },
+                            data: { total: eq.total, updatedAt: new Date() }
+                        });
+                    } else {
+                        await tx.equipment.create({
+                            data: {
+                                id: uuidv4(),
+                                name: eq.name,
+                                total: eq.total,
+                                inUse: 0,
+                                sportId: sportId,
+                                updatedAt: new Date()
+                            }
+                        });
+                    }
+                }
             }
-        })
+        });
+
         revalidatePath('/admin/sports')
         revalidatePath('/')
         return { success: true, data: null }

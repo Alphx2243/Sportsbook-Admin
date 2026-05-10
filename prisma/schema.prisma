@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
 }
 
@@ -8,45 +8,40 @@ datasource db {
 }
 
 model User {
-  id               String   @id @default(uuid())
-  email            String   @unique
+  id               String    @id @default(uuid())
+  email            String    @unique
   password         String
   name             String
   phone            String
   rollNumber       String
   qrCodePath       String?
   sportsExperience String[]
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
   resetToken       String?
   resetTokenExpiry DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  bookings Booking[]
-  gymLogs  GymLog[]
-  role     String   @default("user")
+  role             String    @default("user")
+  bookings         Booking[]
+  gymLogs          GymLog[]
 }
 
 model Sport {
-  id              String   @id @default(uuid())
-  name            String   @unique
-  numberOfCourts  Int
-  totalEquipments String[] 
-  equipmentsInUse String[] @default([]) 
-  courtsInUse     Int      @default(0)
-  courtData       Json?
-  maxCapacity     Int? 
-  numPlayers      Int?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String      @id @default(uuid())
+  name           String      @unique
+  numberOfCourts Int
+  courtsInUse    Int         @default(0)
+  courtData      Json?
+  numPlayers     Int?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  maxCapacity    Int?
+  Equipment      Equipment[]
 }
 
 model Booking {
-  id               String   @id @default(uuid())
+  id               String             @id @default(uuid())
   userId           String
-  user             User     @relation(fields: [userId], references: [id])
   sportName        String
-  issuedEquipments String[] 
-
   numberOfPlayers  Int
   startTime        String
   endTime          String
@@ -55,9 +50,11 @@ model Booking {
   status           String
   endDate          String?
   courtNo          String?
-  scanned          Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  scanned          Boolean            @default(false)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  user             User               @relation(fields: [userId], references: [id])
+  BookingEquipment BookingEquipment[]
 }
 
 model Match {
@@ -99,13 +96,35 @@ model Invite {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
+
 model GymLog {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  entryTime DateTime @default(now())
+  entryTime DateTime  @default(now())
   exitTime  DateTime?
-  duration  Float?   
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  duration  Float?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id])
+}
+
+model BookingEquipment {
+  id          String    @id
+  bookingId   String
+  equipmentId String
+  count       Int       @default(1)
+  Booking     Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  Equipment   Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+}
+
+model Equipment {
+  id               String             @id
+  name             String
+  total            Int                @default(0)
+  inUse            Int                @default(0)
+  sportId          String
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime
+  BookingEquipment BookingEquipment[]
+  Sport            Sport              @relation(fields: [sportId], references: [id], onDelete: Cascade)
 }

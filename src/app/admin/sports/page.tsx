@@ -42,7 +42,7 @@ export default function SportsManagement() {
       setEditData({
          numberOfCourts: sport.numberOfCourts,
          maxCapacity: sport.maxCapacity || '',
-         totalEquipments: sport.totalEquipments.join(', '),
+         totalEquipments: (sport.Equipment || []).map((e: any) => `${e.name}:${e.total}`).join(', '),
          courtsInUse: sport.courtsInUse,
          numPlayers: sport.numPlayers
       })
@@ -279,18 +279,15 @@ export default function SportsManagement() {
                                        Equipment Availability
                                     </p>
                                     <div className="flex flex-wrap gap-4">
-                                       {s.totalEquipments.map((eq: string, idx: number) => {
-                                          const [name, count] = eq.split(':')
-                                          const inUseStr = s.equipmentsInUse.find((e: string) => e.startsWith(name)) || '0:0'
-                                          const inUseCount = parseInt(inUseStr.split(':')[1])
-                                          const available = parseInt(count) - inUseCount
+                                       {(s.Equipment || []).map((eq: any, idx: number) => {
+                                          const available = eq.total - eq.inUse
                                           return (
                                              <div key={idx} className="px-4 py-3 bg-primary/10 border border-border rounded-xl flex items-center gap-4 transition-all hover:bg-blue-500/25 hover:border-blue-500/20 shadow-sm">
                                                 <div className="flex flex-col">
-                                                   <span className="text-sm font-semibold transition-colors">{name}</span>
+                                                   <span className="text-sm font-semibold transition-colors">{eq.name}</span>
                                                    <div className="flex items-center gap-3 mt-1">
                                                       <div className="h-1.5 w-24 bg-primary rounded-full overflow-hidden">
-                                                         <div className="h-full bg-blue-500/80 transition-all duration-500" style={{ width: `${(available / parseInt(count)) * 100}%` }} />
+                                                         <div className="h-full bg-blue-500/80 transition-all duration-500" style={{ width: `${(available / eq.total) * 100}%` }} />
                                                       </div>
                                                       <span className="text-xs font-medium text-muted-foreground tabular-nums">{available} Avail</span>
                                                    </div>

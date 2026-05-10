@@ -3,6 +3,7 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/types/interfaces'
+import { v4 as uuidv4 } from 'uuid'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
@@ -11,7 +12,7 @@ async function notifySocketUpdate(sportName: string, type: string = 'availabilit
     try {
         const response = await fetch(url, {
             method: 'POST',
-            headers: { 
+            headers: {
                 'Content-Type': 'application/json',
                 'x-socket-secret': secret
             },
@@ -27,11 +28,26 @@ export async function createSport(data: any): Promise<ActionResponse> {
     try {
         const sport = await prisma.sport.create({
             data: {
-                name: data.name, numberOfCourts: parseInt(data.courts),
-                totalEquipments: data.totalEquipments || [],
-                equipmentsInUse: data.eqinuse || [], courtsInUse: parseInt(data.crtinuse || 0),
-                numPlayers: parseInt(data.numplayers || 0), courtData: data.CourtData,
+                name: data.name,
+                numberOfCourts: parseInt(data.courts),
+                courtsInUse: parseInt(data.crtinuse || 0),
+                numPlayers: parseInt(data.numplayers || 0),
+                courtData: data.CourtData,
+                maxCapacity: data.maxCapacity ? parseInt(data.maxCapacity) : null,
+                Equipment: {
+                    create: (data.totalEquipments || []).map((eq: string) => {
+                        const [name, total] = eq.split(':');
+                        return {
+                            id: uuidv4(),
+                            name: name.trim(),
+                            total: parseInt(total) || 0,
+                            inUse: 0,
+                            updatedAt: new Date()
+                        }
+                    })
+                }
             },
+            include: { Equipment: true }
         })
         revalidatePath('/')
         await notifySocketUpdate(sport.name);
@@ -45,16 +61,60 @@ export async function createSport(data: any): Promise<ActionResponse> {
 
 export async function updateSport(id: string, data: any): Promise<ActionResponse> {
     try {
-        const sport = await prisma.sport.update({
-            where: { id },
-            data: {
-                name: data.name, numberOfCourts: data.courts ? parseInt(data.courts) : undefined,
-                totalEquipments: data.totalEquipments, equipmentsInUse: data.eqinuse,
-                courtsInUse: data.crtinuse ? parseInt(data.crtinuse) : undefined,
-                numPlayers: data.numplayers !== undefined ? parseInt(data.numplayers) : undefined,
-                courtData: data.CourtData,
-            },
-        })
+        const sport = await prisma.$transaction(async (tx: any) => {
+            const updatedSport = await tx.sport.update({
+                where: { id },
+                data: {
+                    name: data.name,
+                    numberOfCourts: data.courts ? parseInt(data.courts) : undefined,
+                    courtsInUse: data.crtinuse ? parseInt(data.crtinuse) : undefined,
+                    numPlayers: data.numplayers !== undefined ? parseInt(data.numplayers) : undefined,
+                    courtData: data.CourtData,
+                    maxCapacity: data.maxCapacity !== undefined ? parseInt(data.maxCapacity) : undefined,
+                },
+            })
+
+            if (data.totalEquipments) {
+                const existingEqs = await tx.equipment.findMany({ where: { sportId: id } });
+
+                const incomingEqs = data.totalEquipments.map((eq: string) => {
+                    const [name, total] = eq.split(':');
+                    return { name: name.trim(), total: parseInt(total) || 0 };
+                });
+
+                const incomingNames = incomingEqs.map((e: any) => e.name);
+                await tx.equipment.deleteMany({
+                    where: {
+                        sportId: id,
+                        name: { notIn: incomingNames }
+                    }
+                });
+
+                for (const eq of incomingEqs) {
+                    const existing = existingEqs.find((e: any) => e.name === eq.name);
+                    if (existing) {
+                        await tx.equipment.update({
+                            where: { id: existing.id },
+                            data: { total: eq.total, updatedAt: new Date() }
+                        });
+                    } else {
+                        await tx.equipment.create({
+                            data: {
+                                id: uuidv4(),
+                                name: eq.name,
+                                total: eq.total,
+                                inUse: 0,
+                                sportId: id,
+                                updatedAt: new Date()
+                            }
+                        });
+                    }
+                }
+            }
+
+            return updatedSport;
+        });
+
         revalidatePath('/')
         await notifySocketUpdate(sport.name);
         return { success: true, data: sport }
@@ -78,7 +138,10 @@ export async function deleteSport(id: string): Promise<ActionResponse> {
 }
 export async function getSport(id: string): Promise<ActionResponse> {
     try {
-        const sport = await prisma.sport.findUnique({ where: { id }, })
+        const sport = await prisma.sport.findUnique({
+            where: { id },
+            include: { Equipment: true }
+        })
         if (!sport) return { success: false, error: 'Sport not found' }
         return { success: true, data: sport }
     }
@@ -90,7 +153,10 @@ export async function getSport(id: string): Promise<ActionResponse> {
 
 export async function getSports(): Promise<ActionResponse<{ documents: any[], total: number }>> {
     try {
-        const sports = await prisma.sport.findMany({ orderBy: { name: 'asc' }, })
+        const sports = await prisma.sport.findMany({
+            orderBy: { name: 'asc' },
+            include: { Equipment: true }
+        })
         return { success: true, data: { documents: sports, total: sports.length } }
     }
     catch (error: any) {

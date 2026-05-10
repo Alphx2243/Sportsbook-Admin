@@ -129,20 +129,19 @@ export default function BookingManagement() {
                                           </div>
                                        </div>
                                     </div>
-                                    <div className="space-y-3 col-span-1 md:col-span-2 lg:col-span-1">
-                                       <p className="text-xs font-bold uppercase text-muted-foreground">Equipments Issued</p>
-                                       <div className="flex flex-wrap gap-2">
-                                          {b.issuedEquipments && b.issuedEquipments.length > 0 ? b.issuedEquipments.map((eq: string, idx: number) => {
-                                             const [name, count] = eq.split(':')
-                                             return (
-                                                <span key={idx} className="px-3 py-1.5 bg-primary border border-border rounded-lg text-xs font-semibold flex items-center gap-2">
-                                                   <Package className="w-3.5 h-3.5 text-primary-foreground" />
-                                                   {name} <span className="text-primary-foreground ml-1">× {count}</span>
-                                                </span>
-                                             )
-                                          }) : <span className="text-sm font-medium text-muted-foreground italic mt-1">No equipments issued</span>}
-                                       </div>
-                                    </div>
+                                     <div className="space-y-3 col-span-1 md:col-span-2 lg:col-span-1">
+                                        <p className="text-xs font-bold uppercase text-muted-foreground">Equipments Issued</p>
+                                        <div className="flex flex-wrap gap-2">
+                                           {b.BookingEquipment && b.BookingEquipment.length > 0 ? b.BookingEquipment.map((be: any, idx: number) => {
+                                              return (
+                                                 <span key={idx} className="px-3 py-1.5 bg-primary border border-border rounded-lg text-xs font-semibold flex items-center gap-2">
+                                                    <Package className="w-3.5 h-3.5 text-primary-foreground" />
+                                                    {be.Equipment?.name || 'Unknown'} <span className="text-primary-foreground ml-1">× {be.count}</span>
+                                                 </span>
+                                              )
+                                           }) : <span className="text-sm font-medium text-muted-foreground italic mt-1">No equipments issued</span>}
+                                        </div>
+                                     </div>
                                  </div>
                               </div>
 
