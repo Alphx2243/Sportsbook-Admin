@@ -27,7 +27,8 @@ export default function Navbar() {
     { name: 'Bookings', path: '/admin/bookings' },
     { name: 'Users', path: '/admin/users' },
     { name: 'Sports & Facilities', path: '/admin/sports' },
-    { name: 'Match Scoring', path: '/admin/matches' }
+    { name: 'Match Scoring', path: '/admin/matches' },
+    { name: 'Contact us', path: '/admin/contactus'}
   ]
 
   const navigateTo = useCallback((path: string) => router.push(path), [router])

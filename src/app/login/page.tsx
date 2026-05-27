@@ -165,12 +165,6 @@ export default function AuthPage() {
               </Button>
             </form>
 
-            <div className="mt-8 pt-8 border-t border-border/50 text-center">
-              <p className="text-xs text-muted-foreground/60 font-medium leading-relaxed">
-                Protected administrative access only.<br />
-                Unauthorized access attempts are logged.
-              </p>
-            </div>
           </CardContent>
         </Card>
       </motion.div>
