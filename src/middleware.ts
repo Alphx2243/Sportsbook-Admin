@@ -7,6 +7,11 @@ const X_LIMIT = Number(process.env.PER_IP_PER_MINUTE) || 60;
 const Y_LIMIT = Number(process.env.TOTAL_PER_MINUTE) || 700;
 const WINDOW_MS = 60 * 1000; // 1 minute
 
+const allowedOrigins = [
+  'https://sportsbook-admin.onrender.com',
+];
+
+
 export async function middleware(request: NextRequest) {
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
   const origin = request.headers.get('origin');
@@ -22,8 +27,7 @@ export async function middleware(request: NextRequest) {
       console.log('ORIGIN HOST:', originHost);
       console.log('REQUEST HOST:', request.nextUrl.host);
 
-      if (originHost !== request.nextUrl.host) {
-        console.log('403 FROM ORIGIN CHECK');
+      if (origin && !allowedOrigins.includes(origin)) {
         return new NextResponse('Forbidden', { status: 403 });
       }
     } catch (e) {
