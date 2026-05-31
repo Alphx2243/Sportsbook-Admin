@@ -2,31 +2,48 @@
 
 import prisma from '@/lib/prisma'
 import bcrypt from 'bcryptjs'
-import { SignJWT, jwtVerify } from 'jose'
+import { SignJWT } from 'jose'
 import { cookies } from 'next/headers'
-import { v4 as uuidv4 } from 'uuid'
+import { createHash, randomBytes } from 'crypto'
 import { ActionResponse } from '@/types/interfaces'
+import { getJwtSecret } from '@/lib/auth-config'
+import { ensureAdmin, getCurrentSessionUser, publicUserSelect } from '@/lib/auth-utils'
+import { slidingWindowRateLimiter } from '@/lib/rate-limiter'
+import { requireServerEnv } from '@/lib/env'
+import { fail, ok } from '@/lib/action-response'
+import { requiredEmail, requiredString } from '@/lib/validation'
 
-const SECRET_KEY = new TextEncoder().encode(process.env.JWT_SECRET || 'supersecretkey123')
-
+const PASSWORD_MIN_LENGTH = 12
+const PASSWORD_RESET_RESPONSE = 'If an account exists with this email, a reset link has been sent.'
 
 export async function createAccount(): Promise<ActionResponse> {
-    return { 
-        success: false, 
-        error: 'Registration is disabled for the Admin Portal. Please use the main application for user registration.' 
-    }
+    return fail(new Error('Registration is disabled for the Admin Portal. Please use the main application for user registration.'))
 }
 
 export async function login({ email, password }: { email: string; password: string }): Promise<ActionResponse> {
     try {
-        const user = await prisma.user.findUnique({ where: { email }, })
+        const normalizedEmail = requiredEmail(email)
+        const rateLimit = await slidingWindowRateLimiter({
+            identifier: `admin-login:${normalizedEmail}`,
+            limit: 10,
+            windowsMs: 15 * 60 * 1000,
+        })
+        if (!rateLimit.success) throw new Error('Too many login attempts. Please try again later.')
+
+        const user = await prisma.user.findUnique({
+            where: { email: normalizedEmail },
+            select: {
+                ...publicUserSelect,
+                password: true,
+            }
+        })
         if (!user) {
             throw new Error('Invalid email or password.')
         }
 
         
         if (user.role !== 'Admin') {
-            throw new Error('Access denied. This portal is restricted to administrators.')
+            throw new Error('Invalid email or password.')
         }
 
         const isValid = await bcrypt.compare(password, user.password)
@@ -34,11 +51,12 @@ export async function login({ email, password }: { email: string; password: stri
             throw new Error('Invalid email or password.')
         }
         await createSession(user)
-        return { success: true, data: user }
+        const { password: _password, ...publicUser } = user
+        return ok(publicUser)
     }
     catch (error: any) {
         console.error('Login error:', error)
-        return { success: false, error: error.message || 'Failed to login' }
+        return fail(error, 'Failed to login')
     }
 }
 
@@ -49,19 +67,26 @@ export async function updateUser(userId: string, data: {
     sportsExperience?: string[];
 }): Promise<ActionResponse> {
     try {
-        const { name, phone, rollNumber, sportsExperience } = data;
+        const actor = await getCurrentSessionUser()
+        if (!actor || (actor.id !== userId && actor.role !== 'Admin')) {
+            throw new Error('Unauthorized.')
+        }
+
         const user = await prisma.user.update({
             where: { id: userId },
             data: {
-                name, phone,
-                rollNumber, sportsExperience
-            }
+                name: data.name !== undefined ? requiredString(data.name, 'Name') : undefined,
+                phone: data.phone !== undefined ? requiredString(data.phone, 'Phone', 30) : undefined,
+                rollNumber: data.rollNumber !== undefined ? requiredString(data.rollNumber, 'Roll number', 50) : undefined,
+                sportsExperience: data.sportsExperience,
+            },
+            select: publicUserSelect,
         });
-        return { success: true, data: user };
+        return ok(user);
     }
     catch (error: any) {
         console.error("Update user error:", error);
-        return { success: false, error: error.message || 'Failed to update user' };
+        return fail(error, 'Failed to update user');
     }
 }
 
@@ -73,21 +98,7 @@ export async function logout(): Promise<ActionResponse> {
 
 export async function getCurrentUser(): Promise<ActionResponse> {
     try {
-        const cookieStore = await cookies()
-        const session = cookieStore.get('session')
-
-        if (!session) return { success: false, error: 'No session' }
-        const { payload } = await jwtVerify(session.value, SECRET_KEY)
-        if (!payload || !payload.userId) return { success: false, error: 'Invalid session' }
-        const user = await prisma.user.findUnique({
-            where: { id: payload.userId as string },
-            select: {
-                id: true, email: true,
-                name: true, phone: true,
-                rollNumber: true, sportsExperience: true,
-                qrCodePath: true, role: true,
-            }
-        })
+        const user = await getCurrentSessionUser()
         if (!user) return { success: false, error: 'User not found' }
         return { success: true, data: user }
     }
@@ -98,13 +109,9 @@ export async function getCurrentUser(): Promise<ActionResponse> {
 
 export async function getUsers(): Promise<ActionResponse<{ documents: any[], total: number }>> {
     try {
+        await ensureAdmin()
         const users = await prisma.user.findMany({
-            select: {
-                id: true, email: true,
-                name: true, phone: true,
-                rollNumber: true, sportsExperience: true,
-                qrCodePath: true, role: true,
-            }
+            select: publicUserSelect,
         });
         return { success: true, data: { documents: users, total: users.length } };
     }
@@ -116,38 +123,55 @@ export async function getUsers(): Promise<ActionResponse<{ documents: any[], tot
 
 export async function requestPasswordReset(email: string): Promise<ActionResponse> {
     try {
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) {
-            return { success: true, data: "If an account exists with this email, a reset link has been sent." };
+        const normalizedEmail = requiredEmail(email)
+        const rateLimit = await slidingWindowRateLimiter({
+            identifier: `password-reset:${normalizedEmail}`,
+            limit: 3,
+            windowsMs: 60 * 60 * 1000,
+        })
+        if (!rateLimit.success) {
+            return ok(PASSWORD_RESET_RESPONSE)
         }
 
-        const token = uuidv4();
+        const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+        if (!user) {
+            return ok(PASSWORD_RESET_RESPONSE);
+        }
+
+        const token = randomBytes(32).toString('hex');
         const expiry = new Date(Date.now() + 3600000); 
 
         await prisma.user.update({
             where: { id: user.id },
             data: {
-                resetToken: token,
+                resetToken: hashResetToken(token),
                 resetTokenExpiry: expiry,
             },
         });
 
-        const resetLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
+        const appUrl = process.env.ADMIN_APP_URL || process.env.NEXT_PUBLIC_APP_URL
+        if (!appUrl) throw new Error('ADMIN_APP_URL or NEXT_PUBLIC_APP_URL must be configured.')
+        const resetLink = `${appUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
 
-        await sendResetEmail(email, resetLink);
+        await sendResetEmail(normalizedEmail, resetLink);
 
-        return { success: true, data: "Reset link sent to your email." };
+        return ok(PASSWORD_RESET_RESPONSE);
     } catch (error: any) {
         console.error("Request password reset error:", error);
-        return { success: false, error: error.message || "Failed to process request." };
+        return ok(PASSWORD_RESET_RESPONSE);
     }
 }
 
 export async function resetPassword(token: string, newPassword: string): Promise<ActionResponse> {
     try {
+        if (!token || token.length < 32) {
+            return { success: false, error: "Invalid or expired reset token." };
+        }
+        validatePassword(newPassword)
+
         const user = await prisma.user.findFirst({
             where: {
-                resetToken: token,
+                resetToken: hashResetToken(token),
                 resetTokenExpiry: { gt: new Date() },
             },
         });
@@ -176,18 +200,21 @@ export async function resetPassword(token: string, newPassword: string): Promise
 
 async function sendResetEmail(email: string, link: string) {
     const nodemailer = require('nodemailer');
+    const smtpPort = Number(process.env.SMTP_PORT)
+    if (!Number.isInteger(smtpPort) || smtpPort <= 0) throw new Error('SMTP_PORT must be configured.')
+
     const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || '587'),
-        secure: process.env.SMTP_PORT === '465',
+        host: requireServerEnv('SMTP_HOST'),
+        port: smtpPort,
+        secure: smtpPort === 465,
         auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS,
+            user: requireServerEnv('SMTP_USER'),
+            pass: requireServerEnv('SMTP_PASS'),
         },
     });
 
     await transporter.sendMail({
-        from: process.env.SMTP_FROM || '"SportsBook" <noreply@sportsbook.com>',
+        from: requireServerEnv('SMTP_FROM'),
         to: email,
         subject: "Password Reset Request",
         html: `
@@ -210,12 +237,23 @@ async function sendResetEmail(email: string, link: string) {
 async function createSession(user: any) {
     const token = await new SignJWT({ userId: user.id, email: user.email, role: user.role })
         .setProtectedHeader({ alg: 'HS256' })
-        .setExpirationTime('7d').sign(SECRET_KEY)
+        .setExpirationTime('7d').sign(getJwtSecret())
     const cookieStore = await cookies()
     cookieStore.set('session', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
         maxAge: 60 * 60 * 24 * 7, 
         path: '/',
     })
+}
+
+function hashResetToken(token: string) {
+    return createHash('sha256').update(token).digest('hex')
+}
+
+function validatePassword(password: string) {
+    if (!password || password.length < PASSWORD_MIN_LENGTH) {
+        throw new Error(`Password must be at least ${PASSWORD_MIN_LENGTH} characters.`)
+    }
 }

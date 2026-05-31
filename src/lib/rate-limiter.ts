@@ -44,7 +44,7 @@ export async function slidingWindowRateLimiter(input: { identifier: string, limi
     } catch (error) {
         console.error("Rate Limiter Redis Error:", error);
         return {
-            success: true,
+            success: false,
             limit: limit,
             remaining: 0,
             reset: now + windowsMs

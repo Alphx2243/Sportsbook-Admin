@@ -4,10 +4,13 @@ import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/types/interfaces'
 import { v4 as uuidv4 } from 'uuid'
+import { bookingUserSelect, ensureAdmin } from '@/lib/auth-utils'
+import { requireServerEnv } from '@/lib/env'
+import { bookingStatus, positiveInt, requiredString } from '@/lib/validation'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
-    const secret = process.env.SOCKET_INTERNAL_SECRET || 'your_default_secure_secret_here';
+    const secret = requireServerEnv('SOCKET_INTERNAL_SECRET');
 
     console.log(`[SOCKET] Notifying ${url} for ${sportName} (Type: ${type})`);
     try {
@@ -27,6 +30,7 @@ async function notifySocketUpdate(sportName: string, type: string = 'availabilit
 
 export async function createBooking(data: any): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
         const result = await prisma.$transaction(async (tx: any) => {
             const existingBooking = await tx.booking.findFirst({
                 where: {
@@ -52,7 +56,7 @@ export async function createBooking(data: any): Promise<ActionResponse> {
 
                 for (const issued of data.equipmentsIssued) {
                     const [name, countStr] = issued.split(':');
-                    const issuedCount = parseInt(countStr);
+                    const issuedCount = positiveInt(countStr, 'Issued equipment count');
 
                     const equipment = await tx.equipment.findFirst({
                         where: { sportId: sport.id, name: name.trim() }
@@ -75,14 +79,14 @@ export async function createBooking(data: any): Promise<ActionResponse> {
 
             return await tx.booking.create({
                 data: {
-                    userId: data.userId,
-                    sportName: data.sportName,
-                    numberOfPlayers: parseInt(data.numberOfPlayers || 0),
-                    startTime: data.startTime,
-                    endTime: data.endTime,
-                    date: data.date,
+                    userId: requiredString(data.userId, 'User ID'),
+                    sportName: requiredString(data.sportName, 'Sport name'),
+                    numberOfPlayers: positiveInt(data.numberOfPlayers, 'Number of players'),
+                    startTime: requiredString(data.startTime, 'Start time', 20),
+                    endTime: requiredString(data.endTime, 'End time', 20),
+                    date: requiredString(data.date, 'Date', 20),
                     qrDetail: data.qrdetail,
-                    status: data.status,
+                    status: bookingStatus(data.status),
                     endDate: data.enddate,
                     courtNo: data.CourtNo,
                     BookingEquipment: {
@@ -103,14 +107,18 @@ export async function createBooking(data: any): Promise<ActionResponse> {
 
 export async function updateBooking(id: string, data: any): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
         const booking = await prisma.booking.update({
             where: { id },
             data: {
-                userId: data.userId, sportName: data.sportName,
-                numberOfPlayers: data.numberOfPlayers ? parseInt(data.numberOfPlayers) : undefined,
-                startTime: data.startTime, endTime: data.endTime,
+                userId: data.userId !== undefined ? requiredString(data.userId, 'User ID') : undefined,
+                sportName: data.sportName !== undefined ? requiredString(data.sportName, 'Sport name') : undefined,
+                numberOfPlayers: data.numberOfPlayers ? positiveInt(data.numberOfPlayers, 'Number of players') : undefined,
+                startTime: data.startTime !== undefined ? requiredString(data.startTime, 'Start time', 20) : undefined,
+                endTime: data.endTime !== undefined ? requiredString(data.endTime, 'End time', 20) : undefined,
                 scanned: data.scanned, qrDetail: data.qrdetail,
-                status: data.status, endDate: data.enddate,
+                status: data.status !== undefined ? bookingStatus(data.status) : undefined,
+                endDate: data.enddate,
                 courtNo: data.CourtNo,
             },
         })
@@ -125,6 +133,7 @@ export async function updateBooking(id: string, data: any): Promise<ActionRespon
 
 export async function deleteBooking(id: string): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
         await prisma.booking.delete({ where: { id }, })
         revalidatePath('/')
         return { success: true, data: null }
@@ -137,6 +146,7 @@ export async function deleteBooking(id: string): Promise<ActionResponse> {
 
 export async function getBooking(id: string): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
         const booking = await prisma.booking.findUnique({ where: { id }, })
         if (!booking) return { success: false, error: 'Booking not found' }
         return { success: true, data: booking }
@@ -149,9 +159,10 @@ export async function getBooking(id: string): Promise<ActionResponse> {
 
 export async function getBookings(filters: { userId?: string; status?: string; date?: string; timeRange?: string } = {}): Promise<ActionResponse<{ documents: any[], total: number }>> {
     try {
+        await ensureAdmin()
         const where: any = {}
         if (filters.userId) where.userId = filters.userId
-        if (filters.status) where.status = filters.status
+        if (filters.status) where.status = bookingStatus(filters.status)
         if (filters.date) where.date = filters.date
         if (filters.timeRange) {
             where.startTime = { lte: filters.timeRange }
@@ -161,7 +172,9 @@ export async function getBookings(filters: { userId?: string; status?: string; d
             where,
             orderBy: { createdAt: 'desc' },
             include: {
-                user: true,
+                user: {
+                    select: bookingUserSelect,
+                },
                 BookingEquipment: {
                     include: {
                         Equipment: true
@@ -179,6 +192,8 @@ export async function getBookings(filters: { userId?: string; status?: string; d
 
 export async function extendBooking(bookingId: string, extensionMinutes: number): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
+        const safeExtensionMinutes = positiveInt(extensionMinutes, 'Extension minutes')
         const updatedBooking = await prisma.$transaction(async (tx: any) => {
 
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
@@ -186,7 +201,7 @@ export async function extendBooking(bookingId: string, extensionMinutes: number)
 
             const originalStartDate = new Date(`${booking.date}T${booking.startTime}`);
             const currentEndDate = new Date(`${booking.endDate || booking.date}T${booking.endTime}`);
-            const newEndDate = new Date(currentEndDate.getTime() + extensionMinutes * 60000);
+            const newEndDate = new Date(currentEndDate.getTime() + safeExtensionMinutes * 60000);
             const totalDurationMs = newEndDate.getTime() - originalStartDate.getTime();
             const totalDurationMinutes = totalDurationMs / (1000 * 60);
 
@@ -213,6 +228,7 @@ export async function extendBooking(bookingId: string, extensionMinutes: number)
 
 export async function expireBooking(bookingId: string): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
         await prisma.$transaction(async (tx: any) => {
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
             if (!booking || (booking.status !== 'active' && booking.status !== 'returned')) {
@@ -262,6 +278,7 @@ export async function expireBooking(bookingId: string): Promise<ActionResponse> 
 
 export async function requestReturn(bookingId: string): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
         await prisma.$transaction(async (tx: any) => {
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
             if (!booking || booking.status !== 'active') {
@@ -320,6 +337,7 @@ export async function requestReturn(bookingId: string): Promise<ActionResponse> 
 
 export async function secureBooking(data: any): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
         const result = await prisma.$transaction(async (tx: any) => {
             const existingBooking = await tx.booking.findFirst({
                 where: { userId: data.userId, status: { in: ['pending', 'active', 'returned'] } }
@@ -337,7 +355,7 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
             }
             const isCapacityBased = sport.maxCapacity && sport.maxCapacity > 0
             const alreadyBookedPlayers = sport.numPlayers || 0
-            const numPlayers = parseInt(data.numberOfPlayers || 0)
+            const numPlayers = positiveInt(data.numberOfPlayers, 'Number of players')
             const courtNo = data.CourtNo
             if (isCapacityBased) {
                 if (alreadyBookedPlayers + numPlayers > (sport.maxCapacity || 0)) {
@@ -372,7 +390,7 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
             if (data.equipmentsIssued && data.equipmentsIssued.length > 0) {
                 for (const issued of data.equipmentsIssued) {
                     const [name, countStr] = issued.split(':');
-                    const issuedCount = parseInt(countStr);
+                    const issuedCount = positiveInt(countStr, 'Issued equipment count');
 
                     const equipment = await tx.equipment.findFirst({
                         where: { sportId: sport.id, name: name.trim() }
@@ -403,14 +421,14 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
 
             const booking = await tx.booking.create({
                 data: {
-                    userId: data.userId,
-                    sportName: data.sportName,
+                    userId: requiredString(data.userId, 'User ID'),
+                    sportName: requiredString(data.sportName, 'Sport name'),
                     numberOfPlayers: numPlayers,
-                    startTime: data.startTime,
-                    endTime: data.endTime,
-                    date: data.date,
+                    startTime: requiredString(data.startTime, 'Start time', 20),
+                    endTime: requiredString(data.endTime, 'End time', 20),
+                    date: requiredString(data.date, 'Date', 20),
                     qrDetail: data.qrdetail,
-                    status: data.status,
+                    status: bookingStatus(data.status),
                     endDate: data.enddate,
                     courtNo: data.CourtNo,
                     BookingEquipment: {
@@ -437,6 +455,7 @@ import { getISTDate, formatISTTime } from '@/lib/utils';
 
 export async function activateBooking(bookingId: string) {
     try {
+        await ensureAdmin()
         const result = await prisma.$transaction(async (tx: any) => {
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
             if (!booking) throw new Error('Booking not found');

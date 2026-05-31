@@ -4,12 +4,14 @@ import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import bcrypt from 'bcryptjs'
 import type { ActionResponse } from '@/types/interfaces'
-import { ensureAdmin } from '@/lib/auth-utils'
+import { ensureAdmin, publicUserSelect } from '@/lib/auth-utils'
 import { v4 as uuidv4 } from 'uuid'
+import { requireServerEnv } from '@/lib/env'
+import { equipmentList, matchStatus, nonNegativeInt, requiredString, roleValue } from '@/lib/validation'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
-    const secret = process.env.SOCKET_INTERNAL_SECRET || 'your_default_secure_secret_here';
+    const secret = requireServerEnv('SOCKET_INTERNAL_SECRET');
 
     console.log(`[SOCKET] Notifying ${url} for ${sportName} (Type: ${type})`);
     try {
@@ -29,7 +31,7 @@ async function notifySocketUpdate(sportName: string, type: string = 'availabilit
 
 async function notifyMatchesUpdate() {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-matches`;
-    const secret = process.env.SOCKET_INTERNAL_SECRET || 'your_default_secure_secret_here';
+    const secret = requireServerEnv('SOCKET_INTERNAL_SECRET');
 
     console.log(`[SOCKET] Notifying ${url} for matches update`);
     try {
@@ -75,7 +77,8 @@ export async function getAllUsers(): Promise<ActionResponse> {
     try {
         await ensureAdmin();
         const users = await prisma.user.findMany({
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
+            select: publicUserSelect,
         })
         return { success: true, data: users }
     } catch (error: any) {
@@ -86,16 +89,19 @@ export async function getAllUsers(): Promise<ActionResponse> {
 export async function createUser(data: any): Promise<ActionResponse> {
     try {
         await ensureAdmin();
-        const hashedPassword = await bcrypt.hash(data.password, 10)
+        const password = requiredString(data.password, 'Password', 256)
+        if (password.length < 12) throw new Error('Password must be at least 12 characters.')
+        const hashedPassword = await bcrypt.hash(password, 10)
         const user = await prisma.user.create({
             data: {
-                name: data.name,
-                email: data.email,
+                name: requiredString(data.name, 'Name'),
+                email: requiredString(data.email, 'Email').toLowerCase(),
                 password: hashedPassword,
-                phone: data.phone,
-                rollNumber: data.rollNumber,
-                role: data.role || 'user'
-            }
+                phone: requiredString(data.phone, 'Phone', 30),
+                rollNumber: requiredString(data.rollNumber, 'Roll number', 50),
+                role: roleValue(data.role)
+            },
+            select: publicUserSelect,
         })
         revalidatePath('/admin/users')
         return { success: true, data: user }
@@ -110,7 +116,7 @@ export async function updateUserRole(userId: string, role: string): Promise<Acti
         await ensureAdmin();
         await prisma.user.update({
             where: { id: userId },
-            data: { role }
+            data: { role: roleValue(role) }
         })
         revalidatePath('/admin/users')
         return { success: true, data: null }
@@ -184,23 +190,21 @@ export async function approveReturn(bookingId: string): Promise<ActionResponse> 
 export async function updateSportInventory(sportId: string, data: any): Promise<ActionResponse> {
     try {
         await ensureAdmin();
+        const parsedEquipment = data.totalEquipments ? equipmentList(data.totalEquipments) : undefined
         await prisma.$transaction(async (tx: any) => {
             await tx.sport.update({
                 where: { id: sportId },
                 data: {
-                    numberOfCourts: data.numberOfCourts !== undefined ? parseInt(data.numberOfCourts) : undefined,
-                    maxCapacity: data.maxCapacity !== undefined ? parseInt(data.maxCapacity) : undefined,
-                    courtsInUse: data.courtsInUse !== undefined ? parseInt(data.courtsInUse) : undefined,
-                    numPlayers: data.numPlayers !== undefined ? parseInt(data.numPlayers) : undefined,
+                    numberOfCourts: data.numberOfCourts !== undefined ? nonNegativeInt(data.numberOfCourts, 'Number of courts') : undefined,
+                    maxCapacity: data.maxCapacity !== undefined ? nonNegativeInt(data.maxCapacity, 'Max capacity') : undefined,
+                    courtsInUse: data.courtsInUse !== undefined ? nonNegativeInt(data.courtsInUse, 'Courts in use') : undefined,
+                    numPlayers: data.numPlayers !== undefined ? nonNegativeInt(data.numPlayers, 'Active players') : undefined,
                 }
             })
 
-            if (data.totalEquipments) {
+            if (parsedEquipment) {
                 const existingEqs = await tx.equipment.findMany({ where: { sportId } });
-                const incomingEqs = data.totalEquipments.map((eq: string) => {
-                    const [name, total] = eq.split(':');
-                    return { name: name.trim(), total: parseInt(total) || 0 };
-                });
+                const incomingEqs = parsedEquipment;
 
                 const incomingNames = incomingEqs.map((e: any) => e.name);
                 await tx.equipment.deleteMany({
@@ -258,12 +262,12 @@ export async function createMatch(data: any): Promise<ActionResponse> {
         await ensureAdmin();
         const match = await prisma.match.create({
             data: {
-                sportName: data.sportName,
-                team1: data.team1,
-                team2: data.team2,
-                score1: data.score1,
-                score2: data.score2,
-                status: data.status || 'live'
+                sportName: requiredString(data.sportName, 'Sport name'),
+                team1: requiredString(data.team1, 'Team 1'),
+                team2: requiredString(data.team2, 'Team 2'),
+                score1: nonNegativeInt(data.score1, 'Score 1', 0).toString(),
+                score2: nonNegativeInt(data.score2, 'Score 2', 0).toString(),
+                status: matchStatus(data.status)
             }
         })
         revalidatePath('/admin/matches')
@@ -281,11 +285,11 @@ export async function updateMatch(matchId: string, data: any): Promise<ActionRes
         await prisma.match.update({
             where: { id: matchId },
             data: {
-                score1: data.score1,
-                score2: data.score2,
-                status: data.status,
-                team1: data.team1,
-                team2: data.team2,
+                score1: data.score1 !== undefined ? nonNegativeInt(data.score1, 'Score 1').toString() : undefined,
+                score2: data.score2 !== undefined ? nonNegativeInt(data.score2, 'Score 2').toString() : undefined,
+                status: data.status !== undefined ? matchStatus(data.status) : undefined,
+                team1: data.team1 !== undefined ? requiredString(data.team1, 'Team 1') : undefined,
+                team2: data.team2 !== undefined ? requiredString(data.team2, 'Team 2') : undefined,
             }
         })
         revalidatePath('/admin/matches')

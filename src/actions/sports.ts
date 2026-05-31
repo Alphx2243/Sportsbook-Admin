@@ -4,10 +4,13 @@ import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/types/interfaces'
 import { v4 as uuidv4 } from 'uuid'
+import { ensureAdmin } from '@/lib/auth-utils'
+import { requireServerEnv } from '@/lib/env'
+import { equipmentList, nonNegativeInt, requiredString } from '@/lib/validation'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
-    const secret = process.env.SOCKET_INTERNAL_SECRET || 'your_default_secure_secret_here';
+    const secret = requireServerEnv('SOCKET_INTERNAL_SECRET');
 
     try {
         const response = await fetch(url, {
@@ -26,21 +29,23 @@ async function notifySocketUpdate(sportName: string, type: string = 'availabilit
 
 export async function createSport(data: any): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
+        const equipments = equipmentList(data.totalEquipments)
+        const numberOfCourts = nonNegativeInt(data.courts, 'Number of courts')
         const sport = await prisma.sport.create({
             data: {
-                name: data.name,
-                numberOfCourts: parseInt(data.courts),
-                courtsInUse: parseInt(data.crtinuse || 0),
-                numPlayers: parseInt(data.numplayers || 0),
+                name: requiredString(data.name, 'Sport name'),
+                numberOfCourts,
+                courtsInUse: nonNegativeInt(data.crtinuse, 'Courts in use', 0),
+                numPlayers: nonNegativeInt(data.numplayers, 'Active players', 0),
                 courtData: data.CourtData,
-                maxCapacity: data.maxCapacity ? parseInt(data.maxCapacity) : null,
+                maxCapacity: data.maxCapacity ? nonNegativeInt(data.maxCapacity, 'Max capacity') : null,
                 Equipment: {
-                    create: (data.totalEquipments || []).map((eq: string) => {
-                        const [name, total] = eq.split(':');
+                    create: equipments.map((eq) => {
                         return {
                             id: uuidv4(),
-                            name: name.trim(),
-                            total: parseInt(total) || 0,
+                            name: eq.name,
+                            total: eq.total,
                             inUse: 0,
                             updatedAt: new Date()
                         }
@@ -61,26 +66,25 @@ export async function createSport(data: any): Promise<ActionResponse> {
 
 export async function updateSport(id: string, data: any): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
+        const parsedEquipment = data.totalEquipments ? equipmentList(data.totalEquipments) : undefined
         const sport = await prisma.$transaction(async (tx: any) => {
             const updatedSport = await tx.sport.update({
                 where: { id },
                 data: {
-                    name: data.name,
-                    numberOfCourts: data.courts ? parseInt(data.courts) : undefined,
-                    courtsInUse: data.crtinuse ? parseInt(data.crtinuse) : undefined,
-                    numPlayers: data.numplayers !== undefined ? parseInt(data.numplayers) : undefined,
+                    name: data.name !== undefined ? requiredString(data.name, 'Sport name') : undefined,
+                    numberOfCourts: data.courts !== undefined ? nonNegativeInt(data.courts, 'Number of courts') : undefined,
+                    courtsInUse: data.crtinuse !== undefined ? nonNegativeInt(data.crtinuse, 'Courts in use') : undefined,
+                    numPlayers: data.numplayers !== undefined ? nonNegativeInt(data.numplayers, 'Active players') : undefined,
                     courtData: data.CourtData,
-                    maxCapacity: data.maxCapacity !== undefined ? parseInt(data.maxCapacity) : undefined,
+                    maxCapacity: data.maxCapacity !== undefined ? nonNegativeInt(data.maxCapacity, 'Max capacity') : undefined,
                 },
             })
 
-            if (data.totalEquipments) {
+            if (parsedEquipment) {
                 const existingEqs = await tx.equipment.findMany({ where: { sportId: id } });
 
-                const incomingEqs = data.totalEquipments.map((eq: string) => {
-                    const [name, total] = eq.split(':');
-                    return { name: name.trim(), total: parseInt(total) || 0 };
-                });
+                const incomingEqs = parsedEquipment;
 
                 const incomingNames = incomingEqs.map((e: any) => e.name);
                 await tx.equipment.deleteMany({
@@ -126,6 +130,7 @@ export async function updateSport(id: string, data: any): Promise<ActionResponse
 }
 export async function deleteSport(id: string): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
         const sport = await prisma.sport.delete({ where: { id }, })
         revalidatePath('/')
         await notifySocketUpdate(sport.name);
@@ -138,6 +143,7 @@ export async function deleteSport(id: string): Promise<ActionResponse> {
 }
 export async function getSport(id: string): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
         const sport = await prisma.sport.findUnique({
             where: { id },
             include: { Equipment: true }
@@ -153,6 +159,7 @@ export async function getSport(id: string): Promise<ActionResponse> {
 
 export async function getSports(): Promise<ActionResponse<{ documents: any[], total: number }>> {
     try {
+        await ensureAdmin()
         const sports = await prisma.sport.findMany({
             orderBy: { name: 'asc' },
             include: { Equipment: true }
@@ -167,6 +174,7 @@ export async function getSports(): Promise<ActionResponse<{ documents: any[], to
 
 export async function getSportAnalytics(sportName: string): Promise<ActionResponse> {
     try {
+        await ensureAdmin()
         const today = new Date();
         const dates = Array.from({ length: 7 }, (_: unknown, i: number) => {
             const d = new Date(today);
