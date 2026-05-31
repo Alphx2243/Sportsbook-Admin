@@ -9,17 +9,29 @@ const WINDOW_MS = 60 * 1000; // 1 minute
 
 export async function middleware(request: NextRequest) {
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
-    const origin = request.headers.get('origin');
-    if (origin) {
-      try {
-        if (new URL(origin).host !== request.nextUrl.host) {
-          return new NextResponse('Forbidden', { status: 403 });
-        }
-      } catch {
+  const origin = request.headers.get('origin');
+
+  console.log('METHOD:', request.method);
+  console.log('ORIGIN:', origin);
+  console.log('HOST:', request.nextUrl.host);
+
+  if (origin) {
+    try {
+      const originHost = new URL(origin).host;
+
+      console.log('ORIGIN HOST:', originHost);
+      console.log('REQUEST HOST:', request.nextUrl.host);
+
+      if (originHost !== request.nextUrl.host) {
+        console.log('403 FROM ORIGIN CHECK');
         return new NextResponse('Forbidden', { status: 403 });
       }
+    } catch (e) {
+      console.log('403 FROM URL PARSE', e);
+      return new NextResponse('Forbidden', { status: 403 });
     }
   }
+}
 
   const forwarded = request.headers.get('x-forwarded-for');
   const ip = request.headers.get('x-real-ip')
