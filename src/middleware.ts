@@ -13,29 +13,19 @@ const allowedOrigins = [
 
 
 export async function middleware(request: NextRequest) {
+
+
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
-  const origin = request.headers.get('origin');
-
-  console.log('METHOD:', request.method);
-  console.log('ORIGIN:', origin);
-  console.log('HOST:', request.nextUrl.host);
-
-  if (origin) {
-    try {
-      const originHost = new URL(origin).host;
-
-      console.log('ORIGIN HOST:', originHost);
-      console.log('REQUEST HOST:', request.nextUrl.host);
-
-      if (origin && !allowedOrigins.includes(origin)) {
-        return new NextResponse('Forbidden', { status: 403 });
-      }
-    } catch (e) {
-      console.log('403 FROM URL PARSE', e);
+    const origin = request.headers.get('origin');
+    console.log('METHOD:', request.method);
+    console.log('ORIGIN:', origin);
+    console.log('HOST:', request.nextUrl.host);
+    const isServerAction = request.headers.has('next-action');
+    if (!isServerAction && origin && !allowedOrigins.includes(origin)) {
       return new NextResponse('Forbidden', { status: 403 });
     }
   }
-}
+
 
   const forwarded = request.headers.get('x-forwarded-for');
   const ip = request.headers.get('x-real-ip')
