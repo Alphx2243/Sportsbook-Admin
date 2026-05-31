@@ -9,6 +9,16 @@ const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 
 async function main() {
+    if (process.env.ALLOW_DB_RESET !== 'true') {
+        throw new Error('Refusing to reset database unless ALLOW_DB_RESET=true is set.')
+    }
+
+    const seedUserPassword = process.env.RESET_SEED_USER_PASSWORD
+    const seedAdminPassword = process.env.RESET_SEED_ADMIN_PASSWORD
+    if (!seedUserPassword || !seedAdminPassword || seedUserPassword.length < 12 || seedAdminPassword.length < 12) {
+        throw new Error('Set RESET_SEED_USER_PASSWORD and RESET_SEED_ADMIN_PASSWORD to strong values before seeding.')
+    }
+
     console.log('Starting database reset...')
     console.log('Cleaning GymLog...')
     await prisma.gymLog.deleteMany({})
@@ -99,7 +109,7 @@ async function main() {
         {
             name: 'Kunal Budhiraja',
             email: 'kunal24313@iiitd.ac.in',
-            password: 'aforapple',
+            password: seedUserPassword,
             phone: '9810593078',
             rollNumber: '2024313',
 
@@ -107,14 +117,14 @@ async function main() {
         {
             name: 'Alphx',
             email: 'alphx@iiitd.ac.in',
-            password: 'aforapple',
+            password: seedUserPassword,
             phone: '8700740987',
             rollNumber: '2024333',
         },
         {
             name: 'Admin',
             email: 'admin@iiitd.ac.in',
-            password: 'aforapple',
+            password: seedAdminPassword,
             phone: '9810593072',
             rollNumber: '2024213',
             role: 'Admin'

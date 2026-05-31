@@ -3,29 +3,21 @@
 import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Search,
-  Shield,
-  Trash2,
-  User as UserIcon,
-  ShieldAlert,
-  Loader2,
-  Calendar,
-  Plus,
-  X,
-  Mail,
-  Phone,
-  UserPlus,
-  Hash,
-  Key
+  Search, Shield, Trash2, User as UserIcon,
+  ShieldAlert, Loader2, Calendar, Plus,
+  X, Mail, Phone, UserPlus, Hash, Key
 } from 'lucide-react'
 import { getAllUsers, updateUserRole, deleteUser, createUser } from '@/actions/admin'
 import { User } from '@/types/interfaces'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
+import { useAuth } from '@/contexts/AuthContext'
+
 
 export default function UsersManagement() {
   const [users, setUsers] = useState<User[]>([])
+  const [loggedIn, checkloggedIn] = useState<Boolean>(true);
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [processingId, setProcessingId] = useState<string | null>(null)
@@ -39,9 +31,13 @@ export default function UsersManagement() {
     role: 'user'
   })
   const [isCreating, setIsCreating] = useState(false)
-
+  const { user, loading: UserLoading } = useAuth();
+  const isLoggedIn = () => {
+    if(!user || user.role !== "Admin") checkloggedIn(false);
+  }
   useEffect(() => {
     fetchUsers()
+    isLoggedIn()
   }, [])
 
   const fetchUsers = async () => {
@@ -49,16 +45,15 @@ export default function UsersManagement() {
     if (res.success) setUsers(res.data)
     setLoading(false)
   }
-
-  const handleRoleToggle = async (userId: string, currentRole: string) => {
-    const newRole = currentRole === 'Admin' ? 'user' : 'Admin'
-    setProcessingId(userId)
+  const handlePromote = async (userId : string) => {
+    console.log("userid: ", userId);
+    const newRole = "Admin";
     const res = await updateUserRole(userId, newRole)
-    if (res.success) {
+    if(res.success){
       setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u))
     }
-    setProcessingId(null)
   }
+
 
   const handleDelete = async (userId: string) => {
     if (!confirm('Are you sure you want to terminate this account? This action is permanent and all associated data will be purged.')) return
@@ -98,7 +93,9 @@ export default function UsersManagement() {
     u.email?.toLowerCase().includes(search.toLowerCase()) ||
     u.rollNumber?.toLowerCase().includes(search.toLowerCase())
   )
-
+  if(loggedIn === false){
+    throw new Error("Not Authorized");
+  }
   if (loading) {
     return (
       <div className="h-[60vh] flex flex-col items-center justify-center gap-6">
@@ -114,12 +111,12 @@ export default function UsersManagement() {
         <div className="max-w-xl">
           <div className="flex items-center gap-3 mb-4">
             <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-500 text-xs font-bold uppercase tracking-widest border border-blue-500/20">
-              User Directory
+              User data
             </span>
           </div>
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-foreground pb-1 leading-none">Users</h1>
-          <p className="text-muted-foreground mt-6 text-xl font-medium opacity-80 leading-relaxed">
-            Manage user accounts and permissions.
+          <p className="text-muted-foreground mt-1 text-xl font-medium opacity-80 leading-relaxed">
+            Manage users
           </p>
         </div>
 
@@ -144,7 +141,6 @@ export default function UsersManagement() {
         </div>
       </header>
 
-      {}
       <AnimatePresence>
         {isModalOpen && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 sm:p-10">
@@ -304,6 +300,18 @@ export default function UsersManagement() {
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0 w-full lg:w-auto pt-6 lg:pt-0 border-t lg:border-t-0 border-border">
+                      {
+                        u.role !== "Admin" ? (
+                          <Button
+                            size="sm"
+                            onClick={() => handlePromote(u.id)}
+                          >
+                            <p>Promote</p>
+                        </Button>
+                        ) : (
+                          <></>
+                        )
+                      }
                       <Button
                         variant="ghost"
                         size="sm"
