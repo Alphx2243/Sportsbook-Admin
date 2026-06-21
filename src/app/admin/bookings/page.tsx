@@ -29,7 +29,7 @@ export default function BookingManagement() {
    useEffect(() => {
       const fetchBookings = async () => {
          setLoading(true)
-         const res = await getBookings({ status: filter === 'all' ? undefined : filter })
+         const res = await getBookings({ status: filter === 'all' ? undefined : filter === 'expired' ? 'returned' : filter === 'returned' ? 'completed' : filter })
          if (res.success) setBookings(res.data.documents)
          setLoading(false)
       }
