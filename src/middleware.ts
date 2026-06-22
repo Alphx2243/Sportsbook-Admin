@@ -2,10 +2,11 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { slidingWindowRateLimiter } from '@/lib/rate-limiter'
 import { verifySessionToken } from '@/lib/auth-config'
+import { canAccessAdminPath, getDefaultRouteForRole, isPortalRole } from '@/lib/roles'
 
 const X_LIMIT = Number(process.env.PER_IP_PER_MINUTE) || 60;
 const Y_LIMIT = Number(process.env.TOTAL_PER_MINUTE) || 700;
-const WINDOW_MS = 60 * 1000; // 1 minute
+const WINDOW_MS = 60 * 1000;
 
 const allowedOrigins = [
   'https://sportsbook-admin.onrender.com',
@@ -17,9 +18,6 @@ export async function middleware(request: NextRequest) {
 
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
     const origin = request.headers.get('origin');
-    console.log('METHOD:', request.method);
-    console.log('ORIGIN:', origin);
-    console.log('HOST:', request.nextUrl.host);
     const isServerAction = request.headers.has('next-action');
     if (!isServerAction && origin && !allowedOrigins.includes(origin)) {
       return new NextResponse('Forbidden', { status: 403 });
@@ -60,8 +58,12 @@ export async function middleware(request: NextRequest) {
 
     try {
       const payload = await verifySessionToken(session);
-      if (payload.role !== 'Admin' || !payload.userId) {
+      if (!payload.userId || !isPortalRole(payload.role)) {
         return redirectOrReject(request);
+      }
+
+      if (!canAccessAdminPath(payload.role, request.nextUrl.pathname)) {
+        return redirectOrReject(request, getDefaultRouteForRole(payload.role));
       }
     } catch {
       return redirectOrReject(request);
@@ -79,11 +81,11 @@ export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)',],
 }
 
-function redirectOrReject(request: NextRequest) {
+function redirectOrReject(request: NextRequest, redirectPath = '/login') {
   if (request.method !== 'GET') {
     return new NextResponse('Unauthorized', { status: 401 });
   }
 
-  const loginUrl = new URL('/login', request.url);
+  const loginUrl = new URL(redirectPath, request.url);
   return NextResponse.redirect(loginUrl);
 }

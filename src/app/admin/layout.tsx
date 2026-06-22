@@ -2,8 +2,9 @@
 
 import React, { useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
+import { canAccessAdminPath, getDefaultRouteForRole, isPortalRole } from '@/lib/roles'
 
 export default function AdminLayout({
   children,
@@ -12,14 +13,17 @@ export default function AdminLayout({
 }) {
   const { user, loading } = useAuth()
   const router = useRouter()
+  const pathname = usePathname()
 
   useEffect(() => {
     if (!loading) {
-      if (!user || user.role !== 'Admin') {
+      if (!user || !isPortalRole(user.role)) {
         router.push('/login')
+      } else if (!canAccessAdminPath(user.role, pathname)) {
+        router.push(getDefaultRouteForRole(user.role))
       }
     }
-  }, [user, loading, router])
+  }, [user, loading, pathname, router])
 
   if (loading) {
     return (
@@ -34,10 +38,10 @@ export default function AdminLayout({
     )
   }
 
-  if (!user || user.role !== 'Admin') {
+  if (!user || !isPortalRole(user.role) || !canAccessAdminPath(user.role, pathname)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <p className="text-muted-foreground font-bold italic">Redirecting to login...</p>
+        <p className="text-muted-foreground font-bold italic">Redirecting...</p>
       </div>
     )
   }

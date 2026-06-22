@@ -3,9 +3,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
-    Scan, User, Clock, ArrowRight, CheckCircle2, 
-    AlertCircle, Loader2, Camera, Info, 
-    Calendar, Trophy, Activity, QrCode, Upload
+    CheckCircle2,
+    AlertCircle, Loader2, Camera, Info,
+    QrCode, Upload
 } from 'lucide-react'
 import { Html5Qrcode } from 'html5-qrcode'
 import { activateBooking } from '@/actions/bookings'
@@ -68,7 +68,6 @@ export default function BookingScannerPage() {
     }
 
     const onScanFailure = (error: string) => {
-        
     }
 
     const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -79,8 +78,6 @@ export default function BookingScannerPage() {
         setError('')
         setResult(null)
 
-        
-        
         const html5QrCode = new Html5Qrcode("reader-hidden")
         try {
             const decodedText = await html5QrCode.scanFile(file, true)
@@ -104,7 +101,6 @@ export default function BookingScannerPage() {
                 const parsed = JSON.parse(data)
                 if (parsed.bookingId) bookingId = parsed.bookingId
             } catch (e) {
-                
             }
 
             const res = await activateBooking(bookingId)
@@ -287,7 +283,6 @@ export default function BookingScannerPage() {
                     </div>
                 </div>
             </div>
-            {}
             <div id="reader-hidden" className="hidden"></div>
         </main>
     )

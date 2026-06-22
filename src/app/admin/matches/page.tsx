@@ -3,17 +3,13 @@
 import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-   Activity,
    Trophy,
    Plus,
    Edit3,
    Trash2,
-   CheckCircle2,
    Loader2,
    Sword,
-   Target,
-   RefreshCw,
-   Clock
+   Target
 } from 'lucide-react'
 import { getAllMatches, createMatch, updateMatch, deleteMatch } from '@/actions/admin'
 import { getSports } from '@/actions/sports'

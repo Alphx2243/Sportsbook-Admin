@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
+import { getDefaultRouteForRole, isPortalRole } from '@/lib/roles'
 
 export default function Home() {
   const { user, loading } = useAuth()
@@ -11,10 +12,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!loading) {
-      if (!user || user.role !== 'Admin') {
+      if (!user || !isPortalRole(user.role)) {
         router.push('/login')
       } else {
-        router.push('/admin')
+        router.push(getDefaultRouteForRole(user.role))
       }
     }
   }, [user, loading, router])

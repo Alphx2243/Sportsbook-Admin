@@ -112,7 +112,6 @@ async function main() {
             password: seedUserPassword,
             phone: '9810593078',
             rollNumber: '2024313',
-
         },
         {
             name: 'Alphx',
@@ -128,6 +127,22 @@ async function main() {
             phone: '9810593072',
             rollNumber: '2024213',
             role: 'Admin'
+        },
+        {
+            name: 'Guard',
+            email: 'guard@iiitd.ac.in',
+            password: seedAdminPassword,
+            phone: '9810593073',
+            rollNumber: '2024214',
+            role: 'guard'
+        },
+        {
+            name: 'Facility Manager',
+            email: 'facility.manager@iiitd.ac.in',
+            password: seedAdminPassword,
+            phone: '9810593074',
+            rollNumber: '2024215',
+            role: 'facility_manager'
         }
     ]
 

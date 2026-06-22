@@ -4,10 +4,11 @@ import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import bcrypt from 'bcryptjs'
 import type { ActionResponse } from '@/types/interfaces'
-import { ensureAdmin, publicUserSelect } from '@/lib/auth-utils'
+import { ensureAdmin, ensureRoles, publicUserSelect } from '@/lib/auth-utils'
 import { v4 as uuidv4 } from 'uuid'
 import { requireServerEnv } from '@/lib/env'
 import { equipmentList, matchStatus, nonNegativeInt, requiredString, roleValue } from '@/lib/validation'
+import { ROLES } from '@/lib/roles'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
@@ -143,7 +144,7 @@ export async function deleteUser(userId: string): Promise<ActionResponse> {
 
 export async function approveReturn(bookingId: string): Promise<ActionResponse> {
     try {
-        await ensureAdmin();
+        await ensureRoles([ROLES.ADMIN, ROLES.GUARD]);
         await prisma.$transaction(async (tx: any) => {
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
             if (!booking || booking.status !== 'returned') {
@@ -189,7 +190,7 @@ export async function approveReturn(bookingId: string): Promise<ActionResponse> 
 
 export async function updateSportInventory(sportId: string, data: any): Promise<ActionResponse> {
     try {
-        await ensureAdmin();
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER]);
         const parsedEquipment = data.totalEquipments ? equipmentList(data.totalEquipments) : undefined
         await prisma.$transaction(async (tx: any) => {
             await tx.sport.update({
@@ -247,7 +248,7 @@ export async function updateSportInventory(sportId: string, data: any): Promise<
 
 export async function getAllMatches(): Promise<ActionResponse> {
     try {
-        await ensureAdmin();
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER]);
         const matches = await prisma.match.findMany({
             orderBy: { createdAt: 'desc' }
         })
@@ -259,7 +260,7 @@ export async function getAllMatches(): Promise<ActionResponse> {
 
 export async function createMatch(data: any): Promise<ActionResponse> {
     try {
-        await ensureAdmin();
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER]);
         const match = await prisma.match.create({
             data: {
                 sportName: requiredString(data.sportName, 'Sport name'),
@@ -281,7 +282,7 @@ export async function createMatch(data: any): Promise<ActionResponse> {
 
 export async function updateMatch(matchId: string, data: any): Promise<ActionResponse> {
     try {
-        await ensureAdmin();
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER]);
         await prisma.match.update({
             where: { id: matchId },
             data: {
@@ -303,7 +304,7 @@ export async function updateMatch(matchId: string, data: any): Promise<ActionRes
 
 export async function deleteMatch(matchId: string): Promise<ActionResponse> {
     try {
-        await ensureAdmin();
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER]);
         const match = await prisma.match.delete({
             where: { id: matchId }
         })

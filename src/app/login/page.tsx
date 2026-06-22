@@ -9,6 +9,7 @@ import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import ErrorModal from "@/components/ui/ErrorModal";
+import { getDefaultRouteForRole, isPortalRole } from "@/lib/roles";
 
 export default function AuthPage() {
   const { showToast } = useToast();
@@ -27,8 +28,8 @@ export default function AuthPage() {
   }, []);
 
   useEffect(() => {
-    if (user !== null && user.role === 'Admin') {
-      router.push("/admin");
+    if (user !== null && isPortalRole(user.role)) {
+      router.push(getDefaultRouteForRole(user.role));
     }
   }, [user, router]);
 
@@ -66,7 +67,7 @@ export default function AuthPage() {
         type: 'success',
       });
 
-      router.push('/admin');
+      router.push(getDefaultRouteForRole(res.data?.role));
     }
     catch (err: any) {
       console.error("Login failed:", err);
@@ -78,7 +79,6 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4 relative overflow-hidden pt-16">
-      {}
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-600/10 rounded-full blur-[120px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-purple-600/10 rounded-full blur-[120px] pointer-events-none" />
 

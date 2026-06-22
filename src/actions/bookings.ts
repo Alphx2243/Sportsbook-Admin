@@ -4,9 +4,10 @@ import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/types/interfaces'
 import { v4 as uuidv4 } from 'uuid'
-import { bookingUserSelect, ensureAdmin } from '@/lib/auth-utils'
+import { bookingUserSelect, ensureAdmin, ensureRoles } from '@/lib/auth-utils'
 import { requireServerEnv } from '@/lib/env'
 import { bookingStatus, positiveInt, requiredString } from '@/lib/validation'
+import { ROLES } from '@/lib/roles'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
@@ -48,7 +49,6 @@ export async function createBooking(data: any): Promise<ActionResponse> {
 
             const bookingEquipmentData = [];
             if (data.equipmentsIssued && data.equipmentsIssued.length > 0) {
-                // Fetch the sport to get IDs
                 const sport = await tx.sport.findUnique({
                     where: { name: data.sportName }
                 });
@@ -159,7 +159,7 @@ export async function getBooking(id: string): Promise<ActionResponse> {
 
 export async function getBookings(filters: { userId?: string; status?: string; date?: string; timeRange?: string } = {}): Promise<ActionResponse<{ documents: any[], total: number }>> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.GUARD])
         const where: any = {}
         if (filters.userId) where.userId = filters.userId
         if (filters.status) where.status = bookingStatus(filters.status)
@@ -245,7 +245,6 @@ export async function expireBooking(bookingId: string): Promise<ActionResponse> 
                 data: { status: 'expired' }
             });
 
-            // Return equipment to inventory via normalized relational tables
             const bookingEquipments = await tx.bookingEquipment.findMany({
                 where: { bookingId },
                 include: { Equipment: true }
@@ -455,7 +454,7 @@ import { getISTDate, formatISTTime } from '@/lib/utils';
 
 export async function activateBooking(bookingId: string) {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.GUARD])
         const result = await prisma.$transaction(async (tx: any) => {
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
             if (!booking) throw new Error('Booking not found');

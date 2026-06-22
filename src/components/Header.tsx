@@ -1,60 +1,32 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Moon, Sun, AlignRight, X, ChevronDown, LogOut } from 'lucide-react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
+import { Moon, Sun, AlignRight, X, LogOut } from 'lucide-react'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTheme } from '@/contexts/ThemeContext'
 import LogoutModal from './ui/LogoutModal'
+import { getAdminNavLinks } from '@/lib/roles'
 
 export default function Navbar() {
-  const router = useRouter()
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
 
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [adminDropdownOpen, setAdminDropdownOpen] = useState(false)
-  const [mobileAdminDropdownOpen, setMobileAdminDropdownOpen] = useState(false)
   const [logoutModalOpen, setLogoutModalOpen] = useState(false)
 
-  const adminDesktopRef = useRef(null)
-
-  const adminLinks = [
-    { name: 'Overview', path: '/admin' },
-    { name: 'Scanner', path: '/booking-scanner' },
-    { name: 'Bookings', path: '/admin/bookings' },
-    { name: 'Users', path: '/admin/users' },
-    { name: 'Sports & Facilities', path: '/admin/sports' },
-    { name: 'Match Scoring', path: '/admin/matches' },
-    // { name: 'Contact us', path: '/contactus'}
-  ]
-
-  const navigateTo = useCallback((path: string) => router.push(path), [router])
+  const adminLinks = getAdminNavLinks(user?.role)
 
   const toggleMobile = () => {
     setMobileOpen(o => !o)
-    setMobileAdminDropdownOpen(false)
   }
-  const toggleAdminDropdown = () => setAdminDropdownOpen(o => !o)
-  const toggleMobileAdminDropdown = () => setMobileAdminDropdownOpen(o => !o)
 
   const handleLogout = async () => {
     await logout()
     setLogoutModalOpen(false)
     window.location.href = '/'
   }
-
-  useEffect(() => {
-    function handle(e: MouseEvent) {
-      if (adminDesktopRef.current && !(adminDesktopRef.current as any).contains(e.target)) {
-        setAdminDropdownOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handle)
-    return () => document.removeEventListener('mousedown', handle)
-  }, [])
 
   return (
     <nav className="fixed inset-x-0 top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-white/10 dark:border-white/10 border-black/5 shadow-lg">

@@ -3,14 +3,10 @@
 import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-   MapPin,
-   Package,
    Plus,
    Edit3,
    CheckCircle2,
-   Loader2,
-   Activity,
-   Users
+   Loader2
 } from 'lucide-react'
 import { getSports, createSport } from '@/actions/sports'
 import { updateSportInventory } from '@/actions/admin'

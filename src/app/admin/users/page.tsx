@@ -3,8 +3,8 @@
 import React, { useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Search, Shield, Trash2, User as UserIcon,
-  ShieldAlert, Loader2, Calendar, Plus,
+  Search, Trash2, User as UserIcon,
+  Loader2, Plus,
   X, Mail, Phone, UserPlus, Hash, Key
 } from 'lucide-react'
 import { getAllUsers, updateUserRole, deleteUser, createUser } from '@/actions/admin'
@@ -12,12 +12,11 @@ import { User } from '@/types/interfaces'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 import Input from '@/components/ui/Input'
-import { useAuth } from '@/contexts/AuthContext'
+import { normalizeRole, ROLE_LABELS, ROLE_OPTIONS } from '@/lib/roles'
 
 
 export default function UsersManagement() {
   const [users, setUsers] = useState<User[]>([])
-  const [loggedIn, checkloggedIn] = useState<Boolean>(true);
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [processingId, setProcessingId] = useState<string | null>(null)
@@ -31,13 +30,8 @@ export default function UsersManagement() {
     role: 'user'
   })
   const [isCreating, setIsCreating] = useState(false)
-  const { user, loading: UserLoading } = useAuth();
-  const isLoggedIn = () => {
-    if(!user || user.role !== "Admin") checkloggedIn(false);
-  }
   useEffect(() => {
     fetchUsers()
-    isLoggedIn()
   }, [])
 
   const fetchUsers = async () => {
@@ -45,13 +39,15 @@ export default function UsersManagement() {
     if (res.success) setUsers(res.data)
     setLoading(false)
   }
-  const handlePromote = async (userId : string) => {
-    console.log("userid: ", userId);
-    const newRole = "Admin";
+  const handleRoleChange = async (userId: string, newRole: string) => {
+    setProcessingId(userId)
     const res = await updateUserRole(userId, newRole)
     if(res.success){
       setUsers(users.map(u => u.id === userId ? { ...u, role: newRole } : u))
+    } else {
+      alert(`Role update failed: ${res.error}`)
     }
+    setProcessingId(null)
   }
 
 
@@ -93,9 +89,6 @@ export default function UsersManagement() {
     u.email?.toLowerCase().includes(search.toLowerCase()) ||
     u.rollNumber?.toLowerCase().includes(search.toLowerCase())
   )
-  if(loggedIn === false){
-    throw new Error("Not Authorized");
-  }
   if (loading) {
     return (
       <div className="h-[60vh] flex flex-col items-center justify-center gap-6">
@@ -244,6 +237,20 @@ export default function UsersManagement() {
                       />
                     </div>
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-muted-foreground ml-1">Role</label>
+                    <select
+                      className="w-full py-4 px-4 rounded-xl bg-background border border-input text-base outline-none focus:border-primary/50"
+                      value={newUserData.role}
+                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewUserData({ ...newUserData, role: e.target.value })}
+                    >
+                      {ROLE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value} className="bg-card">
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
                   <div className="pt-4">
                     <Button
@@ -275,14 +282,14 @@ export default function UsersManagement() {
                 <CardContent className="p-6 md:p-8">
                   <div className="flex flex-col lg:flex-row items-center gap-6">
                     <div className="flex items-center gap-6 flex-1 min-w-0">
-                      <div className={`w-16 h-16 rounded-xl flex items-center justify-center border transition-all duration-300 ${u.role === 'Admin' ? 'bg-primary/100 border-primary/20 text-primary shadow-sm' : 'bg-primary/100 border-border text-primary-foreground'}`}>
+                      <div className={`w-16 h-16 rounded-xl flex items-center justify-center border transition-all duration-300 ${normalizeRole(u.role) === 'Admin' ? 'bg-primary/100 border-primary/20 text-primary shadow-sm' : 'bg-primary/100 border-border text-primary-foreground'}`}>
                         <UserIcon className="w-8 h-8" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3 mb-1">
                           <h3 className="text-2xl font-bold truncate">{u.name}</h3>
-                          <span className={`px-2 py-0.5 rounded text-xs font-semibold uppercase shadow-sm ${u.role === 'Admin' ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-primary text-primary-foreground border border-border'}`}>
-                            {u.role}
+                          <span className={`px-2 py-0.5 rounded text-xs font-semibold uppercase shadow-sm ${normalizeRole(u.role) === 'Admin' ? 'bg-primary text-primary-foreground shadow-sm' : 'bg-primary text-primary-foreground border border-border'}`}>
+                            {ROLE_LABELS[normalizeRole(u.role)]}
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-x-6 gap-y-1 mt-2">
@@ -300,18 +307,18 @@ export default function UsersManagement() {
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0 w-full lg:w-auto pt-6 lg:pt-0 border-t lg:border-t-0 border-border">
-                      {
-                        u.role !== "Admin" ? (
-                          <Button
-                            size="sm"
-                            onClick={() => handlePromote(u.id)}
-                          >
-                            <p>Promote</p>
-                        </Button>
-                        ) : (
-                          <></>
-                        )
-                      }
+                      <select
+                        className="h-12 rounded-lg bg-background border border-border px-3 text-sm font-semibold outline-none focus:border-primary/50"
+                        value={normalizeRole(u.role)}
+                        onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleRoleChange(u.id, e.target.value)}
+                        disabled={processingId === u.id}
+                      >
+                        {ROLE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value} className="bg-card">
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                       <Button
                         variant="ghost"
                         size="sm"

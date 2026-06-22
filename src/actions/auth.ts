@@ -12,6 +12,7 @@ import { slidingWindowRateLimiter } from '@/lib/rate-limiter'
 import { requireServerEnv } from '@/lib/env'
 import { fail, ok } from '@/lib/action-response'
 import { requiredEmail, requiredString } from '@/lib/validation'
+import { isPortalRole, normalizeRole, ROLES } from '@/lib/roles'
 
 const PASSWORD_MIN_LENGTH = 12
 const PASSWORD_RESET_RESPONSE = 'If an account exists with this email, a reset link has been sent.'
@@ -42,7 +43,7 @@ export async function login({ email, password }: { email: string; password: stri
         }
 
         
-        if (user.role !== 'Admin') {
+        if (!isPortalRole(user.role)) {
             throw new Error('Invalid email or password.')
         }
 
@@ -68,7 +69,7 @@ export async function updateUser(userId: string, data: {
 }): Promise<ActionResponse> {
     try {
         const actor = await getCurrentSessionUser()
-        if (!actor || (actor.id !== userId && actor.role !== 'Admin')) {
+        if (!actor || (actor.id !== userId && normalizeRole(actor.role) !== ROLES.ADMIN)) {
             throw new Error('Unauthorized.')
         }
 

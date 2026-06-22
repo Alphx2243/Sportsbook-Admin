@@ -5,15 +5,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
    CalendarCheck,
    Clock,
-   MapPin,
    Package,
    User,
    Loader2,
    CheckCircle2,
-   AlertTriangle,
-   Trophy,
-   Activity,
-   ArrowRight
+   AlertTriangle
 } from 'lucide-react'
 import { getBookings } from '@/actions/bookings'
 import { approveReturn } from '@/actions/admin'

@@ -4,9 +4,10 @@ import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/types/interfaces'
 import { v4 as uuidv4 } from 'uuid'
-import { ensureAdmin } from '@/lib/auth-utils'
+import { ensureRoles } from '@/lib/auth-utils'
 import { requireServerEnv } from '@/lib/env'
 import { equipmentList, nonNegativeInt, requiredString } from '@/lib/validation'
+import { ROLES } from '@/lib/roles'
 
 async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
@@ -29,7 +30,7 @@ async function notifySocketUpdate(sportName: string, type: string = 'availabilit
 
 export async function createSport(data: any): Promise<ActionResponse> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const equipments = equipmentList(data.totalEquipments)
         const numberOfCourts = nonNegativeInt(data.courts, 'Number of courts')
         const sport = await prisma.sport.create({
@@ -66,7 +67,7 @@ export async function createSport(data: any): Promise<ActionResponse> {
 
 export async function updateSport(id: string, data: any): Promise<ActionResponse> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const parsedEquipment = data.totalEquipments ? equipmentList(data.totalEquipments) : undefined
         const sport = await prisma.$transaction(async (tx: any) => {
             const updatedSport = await tx.sport.update({
@@ -130,7 +131,7 @@ export async function updateSport(id: string, data: any): Promise<ActionResponse
 }
 export async function deleteSport(id: string): Promise<ActionResponse> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const sport = await prisma.sport.delete({ where: { id }, })
         revalidatePath('/')
         await notifySocketUpdate(sport.name);
@@ -143,7 +144,7 @@ export async function deleteSport(id: string): Promise<ActionResponse> {
 }
 export async function getSport(id: string): Promise<ActionResponse> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const sport = await prisma.sport.findUnique({
             where: { id },
             include: { Equipment: true }
@@ -159,7 +160,7 @@ export async function getSport(id: string): Promise<ActionResponse> {
 
 export async function getSports(): Promise<ActionResponse<{ documents: any[], total: number }>> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const sports = await prisma.sport.findMany({
             orderBy: { name: 'asc' },
             include: { Equipment: true }
@@ -174,7 +175,7 @@ export async function getSports(): Promise<ActionResponse<{ documents: any[], to
 
 export async function getSportAnalytics(sportName: string): Promise<ActionResponse> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const today = new Date();
         const dates = Array.from({ length: 7 }, (_: unknown, i: number) => {
             const d = new Date(today);

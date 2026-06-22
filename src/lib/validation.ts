@@ -1,4 +1,5 @@
-const ROLE_VALUES = new Set(['user', 'Admin'])
+import { normalizeRole } from '@/lib/roles'
+
 const MATCH_STATUSES = new Set(['live', 'finished'])
 const BOOKING_STATUSES = new Set(['pending', 'active', 'returned', 'expired'])
 
@@ -35,8 +36,7 @@ export function positiveInt(value: unknown, field: string): number {
 }
 
 export function roleValue(value: unknown): string {
-    const role = typeof value === 'string' && ROLE_VALUES.has(value) ? value : 'user'
-    return role
+    return normalizeRole(value)
 }
 
 export function matchStatus(value: unknown): string {

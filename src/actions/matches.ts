@@ -3,9 +3,10 @@
 import prisma from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/types/interfaces'
-import { ensureAdmin } from '@/lib/auth-utils'
+import { ensureRoles } from '@/lib/auth-utils'
 import { requireServerEnv } from '@/lib/env'
 import { matchStatus, nonNegativeInt, requiredString } from '@/lib/validation'
+import { ROLES } from '@/lib/roles'
 
 async function notifyMatchesUpdate() {
     const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-matches`;
@@ -27,7 +28,7 @@ async function notifyMatchesUpdate() {
 
 export async function createMatch(data: any): Promise<ActionResponse> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const match = await prisma.match.create({
             data: {
                 sportName: requiredString(data.sportName, 'Sport name'),
@@ -50,7 +51,7 @@ export async function createMatch(data: any): Promise<ActionResponse> {
 
 export async function getMatches(filters: { status?: string; sportName?: string } = {}): Promise<ActionResponse<{ documents: any[], total: number }>> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const where: any = {}
         if (filters.status) where.status = matchStatus(filters.status)
         if (filters.sportName) where.sportName = requiredString(filters.sportName, 'Sport name')
@@ -69,7 +70,7 @@ export async function getMatches(filters: { status?: string; sportName?: string 
 
 export async function updateMatch(id: string, data: any): Promise<ActionResponse> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const match = await prisma.match.update({
             where: { id },
             data: {
@@ -90,7 +91,7 @@ export async function updateMatch(id: string, data: any): Promise<ActionResponse
 
 export async function deleteMatch(id: string): Promise<ActionResponse> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         await prisma.match.delete({ where: { id }, })
         revalidatePath('/live-scores')
         await notifyMatchesUpdate();
