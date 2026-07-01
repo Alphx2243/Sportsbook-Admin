@@ -495,3 +495,55 @@ export async function activateBooking(bookingId: string) {
         return { success: false, error: error.message || 'Failed to activate booking' };
     }
 }
+
+export async function AddGymQRLog(UserGymId : string) {
+    try {
+        await ensureAdmin();
+        const ExitTime = getISTDate();
+        console.log("ExitTime: ", ExitTime);
+        try{
+            const result = await prisma.$transaction(async (tx: any) => {
+            const existingLog = await tx.gymLog.findFirst({
+                where: {
+                    userId: UserGymId,
+                    status: { in: ['active'] }
+                }
+            })
+            console.log("Existing Log: ", existingLog);
+            if(existingLog) {
+                const bookingId = existingLog.id;
+                const log = await prisma.gymLog.update({
+                    where: { 
+                        id: bookingId,
+                        status: { in: ['active'] }
+                     },
+                    data: { 
+                        status: 'completed',
+                        exitTime: ExitTime,
+                        updatedAt: ExitTime,
+                    }
+                })
+                return {success: true, data: log};
+            }
+            const log = await prisma.gymLog.create({
+                data: {
+                    id: uuidv4(),
+                    userId: UserGymId,
+                    entryTime: ExitTime,
+                    status: 'active',
+                    createdAt: ExitTime,
+                    updatedAt: ExitTime,
+                }
+            })
+        })
+        console.log("Booking.ts result: ", result);
+        return {success: true, data: result};
+    }
+    catch(err: any){
+        console.log("Error in AddGymQRLog: ", err);
+        return {success: false, error: err.message || 'Failed to add gym QR log'};
+    }
+    }
+    catch (error: any) {
+    }
+}
