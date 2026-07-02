@@ -1,3 +1,4 @@
+const { randomUUID } = require('crypto')
 const { PrismaClient } = require('@prisma/client')
 const { PrismaPg } = require('@prisma/adapter-pg')
 const { Pool } = require('pg')
@@ -28,6 +29,8 @@ async function main() {
     await prisma.guideApplication.deleteMany({})
     console.log('Cleaning Match...')
     await prisma.match.deleteMany({})
+    console.log('Cleaning BookingEquipment...')
+    await prisma.bookingEquipment.deleteMany({})
     console.log('Cleaning Booking...')
     await prisma.booking.deleteMany({})
     console.log('Cleaning User...')
@@ -42,10 +45,10 @@ async function main() {
             courtsInUse: 0,
             numPlayers: 0,
             courtData: ['Court 1:0', 'Court 2:0', 'Court 3:0'],
-            equipments: {
+            Equipment: {
                 create: [
-                    { name: 'Racket', total: 20 },
-                    { name: 'Shuttle', total: 50 }
+                    { id: randomUUID(), name: 'Racket', total: 20, updatedAt: new Date() },
+                    { id: randomUUID(), name: 'Shuttle', total: 50, updatedAt: new Date() }
                 ]
             }
         },
@@ -55,10 +58,10 @@ async function main() {
             courtsInUse: 0,
             numPlayers: 0,
             courtData: ['Court 1:0', 'Court 2:0'],
-            equipments: {
+            Equipment: {
                 create: [
-                    { name: 'Racket', total: 10 },
-                    { name: 'Ball', total: 20 }
+                    { id: randomUUID(), name: 'Racket', total: 10, updatedAt: new Date() },
+                    { id: randomUUID(), name: 'Ball', total: 20, updatedAt: new Date() }
                 ]
             }
         },
@@ -68,10 +71,10 @@ async function main() {
             courtsInUse: 0,
             numPlayers: 0,
             courtData: ['Table 1:0', 'Table 2:0', 'Table 3:0', 'Table 4:0'],
-            equipments: {
+            Equipment: {
                 create: [
-                    { name: 'Racket', total: 20 },
-                    { name: 'Ball', total: 50 }
+                    { id: randomUUID(), name: 'Racket', total: 20, updatedAt: new Date() },
+                    { id: randomUUID(), name: 'Ball', total: 50, updatedAt: new Date() }
                 ]
             }
         },
@@ -81,10 +84,10 @@ async function main() {
             courtsInUse: 0,
             numPlayers: 0,
             courtData: ['Court 1:0', 'Court 2:0'],
-            equipments: {
+            Equipment: {
                 create: [
-                    { name: 'Racket', total: 15 },
-                    { name: 'Ball', total: 40 }
+                    { id: randomUUID(), name: 'Racket', total: 15, updatedAt: new Date() },
+                    { id: randomUUID(), name: 'Ball', total: 40, updatedAt: new Date() }
                 ]
             }
         },
