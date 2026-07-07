@@ -31,7 +31,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const fetchUser = async () => {
     try {
       const res: ActionResponse<User> = await getCurrentUser();
-      console.log("Current user:", res);
       if (res.success) {
         setUser(res.data || null);
       } else {

@@ -21,8 +21,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
             if (savedTheme) { setTheme(savedTheme); }
             else if (window.matchMedia("(prefers-color-scheme: light)").matches) { setTheme("light"); }
         }
-        catch (e) {
-            console.warn("localStorage is not available:", e);
+        catch {
         }
     }, []);
 
@@ -32,7 +31,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         root.classList.remove("light", "dark");
         root.classList.add(theme);
         try { localStorage.setItem("theme", theme); }
-        catch (e) { console.warn("Failed to save theme to localStorage:", e); }
+        catch { }
     }, [theme, mounted]);
 
     const toggleTheme = () => {

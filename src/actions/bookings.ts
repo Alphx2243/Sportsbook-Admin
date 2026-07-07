@@ -5,29 +5,11 @@ import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/types/interfaces'
 import { v4 as uuidv4 } from 'uuid'
 import { bookingUserSelect, ensureAdmin, ensureRoles } from '@/lib/auth-utils'
-import { requireServerEnv } from '@/lib/env'
 import { bookingStatus, positiveInt, requiredString } from '@/lib/validation'
 import { ROLES } from '@/lib/roles'
-
-async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
-    const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
-    const secret = requireServerEnv('SOCKET_INTERNAL_SECRET');
-
-    console.log(`[SOCKET] Notifying ${url} for ${sportName} (Type: ${type})`);
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-socket-secret': secret
-            },
-            body: JSON.stringify({ sportName, type }),
-        });
-        if (!response.ok) console.error(`[SOCKET] Server returned ${response.status}`);
-    } catch (error) {
-        console.error('[SOCKET] Failed to notify server:', error);
-    }
-}
+import { createBookingQrPayload, parseBookingQrPayload, verifyBookingQrPayload } from '@/lib/booking-qr'
+import { dateToDateString, dateToTimeString, getISTDayRange, parseBookingDateTime, resolveCourtByNo, resolveSportByName, withBookingDisplay } from '@/lib/normalized-data'
+import { notifySportUpdate } from '@/lib/socket-notify'
 
 export async function createBooking(data: any): Promise<ActionResponse> {
     try {
@@ -36,24 +18,20 @@ export async function createBooking(data: any): Promise<ActionResponse> {
             const existingBooking = await tx.booking.findFirst({
                 where: {
                     userId: data.userId,
-                    status: { in: ['pending', 'active', 'returned'] }
+                    status: { in: ['pending', 'active', 'expired'] }
                 }
             })
 
             if (existingBooking) {
-                const msg = existingBooking.status === 'active'
+                const msg = existingBooking.status === 'active' || existingBooking.status === 'expired'
                     ? 'User already has an active booking.'
-                    : 'Previous session return is pending admin approval.';
-                throw new Error(`${msg} Please return items and wait for admin approval first.`)
+                    : 'User already has a pending booking.';
+                throw new Error(`${msg} Please complete it before booking again.`)
             }
 
             const bookingEquipmentData = [];
+            const sport = await resolveSportByName(tx, requiredString(data.sportName, 'Sport name'))
             if (data.equipmentsIssued && data.equipmentsIssued.length > 0) {
-                const sport = await tx.sport.findUnique({
-                    where: { name: data.sportName }
-                });
-                if (!sport) throw new Error('Sport not found');
-
                 for (const issued of data.equipmentsIssued) {
                     const [name, countStr] = issued.split(':');
                     const issuedCount = positiveInt(countStr, 'Issued equipment count');
@@ -76,28 +54,33 @@ export async function createBooking(data: any): Promise<ActionResponse> {
                     });
                 }
             }
+            const court = await resolveCourtByNo(tx, sport.id, data.CourtNo)
 
-            return await tx.booking.create({
+            const booking = await tx.booking.create({
                 data: {
                     userId: requiredString(data.userId, 'User ID'),
-                    sportName: requiredString(data.sportName, 'Sport name'),
+                    sportId: sport.id,
+                    courtId: court?.id,
                     numberOfPlayers: positiveInt(data.numberOfPlayers, 'Number of players'),
-                    startTime: requiredString(data.startTime, 'Start time', 20),
-                    endTime: requiredString(data.endTime, 'End time', 20),
-                    date: requiredString(data.date, 'Date', 20),
+                    startAt: parseBookingDateTime(requiredString(data.date, 'Date', 20), requiredString(data.startTime, 'Start time', 20)),
+                    endAt: parseBookingDateTime(requiredString(data.enddate || data.date, 'End date', 20), requiredString(data.endTime, 'End time', 20)),
                     qrDetail: data.qrdetail,
                     status: bookingStatus(data.status),
-                    endDate: data.enddate,
-                    courtNo: data.CourtNo,
                     BookingEquipment: {
                         create: bookingEquipmentData
                     }
                 },
+                include: { sport: true, court: true },
+            })
+            return await tx.booking.update({
+                where: { id: booking.id },
+                data: buildSignedQrUpdate(booking, data.qrdetail),
+                include: { sport: true, court: true },
             })
         });
 
         revalidatePath('/')
-        return { success: true, data: result }
+        return { success: true, data: withBookingDisplay(result) }
     }
     catch (error: any) {
         console.error('Create booking error:', error)
@@ -108,22 +91,34 @@ export async function createBooking(data: any): Promise<ActionResponse> {
 export async function updateBooking(id: string, data: any): Promise<ActionResponse> {
     try {
         await ensureAdmin()
+        const existing = await prisma.booking.findUnique({ where: { id }, include: { sport: true, court: true } })
+        if (!existing) throw new Error('Booking not found')
+        const updateData: any = {
+            userId: data.userId !== undefined ? requiredString(data.userId, 'User ID') : undefined,
+            numberOfPlayers: data.numberOfPlayers ? positiveInt(data.numberOfPlayers, 'Number of players') : undefined,
+            startAt: data.startTime !== undefined || data.date !== undefined
+                ? parseBookingDateTime(data.date || dateToDateString(existing.startAt), data.startTime || dateToTimeString(existing.startAt))
+                : undefined,
+            endAt: data.endTime !== undefined || data.enddate !== undefined || data.date !== undefined
+                ? parseBookingDateTime(data.enddate || data.date || dateToDateString(existing.endAt), data.endTime || dateToTimeString(existing.endAt))
+                : undefined,
+            scanned: data.scanned,
+            qrDetail: data.qrdetail,
+            status: data.status !== undefined ? bookingStatus(data.status) : undefined,
+        }
+        if (data.sportName || data.CourtNo !== undefined) {
+            const sport = data.sportName ? await resolveSportByName(prisma, data.sportName) : existing.sport
+            const court = await resolveCourtByNo(prisma, sport.id, data.CourtNo ?? existing.court?.courtNumber?.toString())
+            updateData.sportId = sport.id
+            updateData.courtId = court?.id || null
+        }
         const booking = await prisma.booking.update({
             where: { id },
-            data: {
-                userId: data.userId !== undefined ? requiredString(data.userId, 'User ID') : undefined,
-                sportName: data.sportName !== undefined ? requiredString(data.sportName, 'Sport name') : undefined,
-                numberOfPlayers: data.numberOfPlayers ? positiveInt(data.numberOfPlayers, 'Number of players') : undefined,
-                startTime: data.startTime !== undefined ? requiredString(data.startTime, 'Start time', 20) : undefined,
-                endTime: data.endTime !== undefined ? requiredString(data.endTime, 'End time', 20) : undefined,
-                scanned: data.scanned, qrDetail: data.qrdetail,
-                status: data.status !== undefined ? bookingStatus(data.status) : undefined,
-                endDate: data.enddate,
-                courtNo: data.CourtNo,
-            },
+            data: updateData,
+            include: { sport: true, court: true },
         })
         revalidatePath('/')
-        return { success: true, data: booking }
+        return { success: true, data: withBookingDisplay(booking) }
     }
     catch (error: any) {
         console.error('Update booking error:', error)
@@ -147,9 +142,9 @@ export async function deleteBooking(id: string): Promise<ActionResponse> {
 export async function getBooking(id: string): Promise<ActionResponse> {
     try {
         await ensureAdmin()
-        const booking = await prisma.booking.findUnique({ where: { id }, })
+        const booking = await prisma.booking.findUnique({ where: { id }, include: { sport: true, court: true } })
         if (!booking) return { success: false, error: 'Booking not found' }
-        return { success: true, data: booking }
+        return { success: true, data: withBookingDisplay(booking) }
     }
     catch (error: any) {
         console.error('Get booking error:', error)
@@ -160,13 +155,18 @@ export async function getBooking(id: string): Promise<ActionResponse> {
 export async function getBookings(filters: { userId?: string; status?: string; date?: string; timeRange?: string } = {}): Promise<ActionResponse<{ documents: any[], total: number }>> {
     try {
         await ensureRoles([ROLES.ADMIN, ROLES.GUARD])
+        await expireOverdueBookings()
         const where: any = {}
         if (filters.userId) where.userId = filters.userId
         if (filters.status) where.status = bookingStatus(filters.status)
-        if (filters.date) where.date = filters.date
+        if (filters.date) {
+            where.startAt = getISTDayRange(filters.date)
+        }
         if (filters.timeRange) {
-            where.startTime = { lte: filters.timeRange }
-            where.endTime = { gt: filters.timeRange }
+            const day = filters.date || dateToDateString(new Date())
+            const time = parseBookingDateTime(day, filters.timeRange)
+            where.startAt = { ...(where.startAt || {}), lte: time }
+            where.endAt = { gt: time }
         }
         const bookings = await prisma.booking.findMany({
             where,
@@ -179,10 +179,13 @@ export async function getBookings(filters: { userId?: string; status?: string; d
                     include: {
                         Equipment: true
                     }
-                }
+                },
+                sport: true,
+                court: true,
             }
         })
-        return { success: true, data: { documents: bookings, total: bookings.length } }
+        const documents = bookings.map(withBookingQrDisplay)
+        return { success: true, data: { documents, total: documents.length } }
     }
     catch (error: any) {
         console.error('Get bookings error:', error)
@@ -199,8 +202,8 @@ export async function extendBooking(bookingId: string, extensionMinutes: number)
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
             if (!booking) throw new Error('Booking not found');
 
-            const originalStartDate = new Date(`${booking.date}T${booking.startTime}`);
-            const currentEndDate = new Date(`${booking.endDate || booking.date}T${booking.endTime}`);
+            const originalStartDate = new Date(booking.startAt);
+            const currentEndDate = new Date(booking.endAt);
             const newEndDate = new Date(currentEndDate.getTime() + safeExtensionMinutes * 60000);
             const totalDurationMs = newEndDate.getTime() - originalStartDate.getTime();
             const totalDurationMinutes = totalDurationMs / (1000 * 60);
@@ -209,12 +212,9 @@ export async function extendBooking(bookingId: string, extensionMinutes: number)
                 throw new Error('Total booking duration cannot exceed 4 hours');
             }
 
-            const newEndTime = newEndDate.toTimeString().split(' ')[0];
-            const newEndDateStr = newEndDate.toISOString().split('T')[0];
-
             return await tx.booking.update({
                 where: { id: bookingId },
-                data: { endTime: newEndTime, endDate: newEndDateStr }
+                data: { endAt: newEndDate }
             });
         });
         revalidatePath('/')
@@ -231,11 +231,14 @@ export async function expireBooking(bookingId: string): Promise<ActionResponse> 
         await ensureAdmin()
         await prisma.$transaction(async (tx: any) => {
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
-            if (!booking || (booking.status !== 'active' && booking.status !== 'returned')) {
+            if (!booking || (booking.status !== 'active' && booking.status !== 'pending')) {
                 throw new Error('Booking not found or already inactive');
             }
+            if (new Date(booking.endAt).getTime() > Date.now()) {
+                throw new Error('Booking time has not ended yet.');
+            }
 
-            const [sportRow]: any = await tx.$queryRaw`SELECT * FROM "Sport" WHERE "name" = ${booking.sportName} FOR UPDATE`;
+            const [sportRow]: any = await tx.$queryRaw`SELECT * FROM "Sport" WHERE "id" = ${booking.sportId} FOR UPDATE`;
             if (!sportRow) {
                 throw new Error('Associated Sport not found');
             }
@@ -245,16 +248,8 @@ export async function expireBooking(bookingId: string): Promise<ActionResponse> 
                 data: { status: 'expired' }
             });
 
-            const bookingEquipments = await tx.bookingEquipment.findMany({
-                where: { bookingId },
-                include: { Equipment: true }
-            });
-
-            for (const be of bookingEquipments) {
-                await tx.equipment.update({
-                    where: { id: be.equipmentId },
-                    data: { inUse: { decrement: be.count } }
-                });
+            if (booking.status === 'pending') {
+                await restoreBookingEquipment(tx, bookingId);
             }
         });
         revalidatePath('/')
@@ -262,9 +257,9 @@ export async function expireBooking(bookingId: string): Promise<ActionResponse> 
         revalidatePath('/book-court')
 
 
-        const [bookingForSport]: any = await prisma.$queryRaw`SELECT "sportName" FROM "Booking" WHERE "id" = ${bookingId}`;
+        const bookingForSport: any = await prisma.booking.findUnique({ where: { id: bookingId }, include: { sport: true } });
         if (bookingForSport) {
-            await notifySocketUpdate(bookingForSport.sportName, 'availability_changed');
+            await notifySportUpdate(bookingForSport.sport.name, 'availability_changed');
         }
 
         return { success: true, data: null }
@@ -275,45 +270,28 @@ export async function expireBooking(bookingId: string): Promise<ActionResponse> 
     }
 }
 
-export async function requestReturn(bookingId: string): Promise<ActionResponse> {
+export async function completeBooking(bookingId: string): Promise<ActionResponse> {
     try {
-        await ensureAdmin()
+        await ensureRoles([ROLES.ADMIN, ROLES.GUARD])
+        const endedAt = getISTDate()
         await prisma.$transaction(async (tx: any) => {
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
-            if (!booking || booking.status !== 'active') {
-                throw new Error('Booking not found or not active');
+            if (!booking || (booking.status !== 'active' && booking.status !== 'expired')) {
+                throw new Error('Booking not found or cannot be completed');
             }
 
-            const [sport]: any = await tx.$queryRaw`SELECT * FROM "Sport" WHERE "name" = ${booking.sportName} FOR UPDATE`;
+            const [sport]: any = await tx.$queryRaw`SELECT * FROM "Sport" WHERE "id" = ${booking.sportId} FOR UPDATE`;
             if (!sport) {
                 throw new Error('Associated Sport not found');
             }
 
-
-            const courtNo = booking.courtNo;
-            let newCourtData = sport.courtData || [];
-            newCourtData = newCourtData.map((item: any, i: number) => {
-                const targetIndex = parseInt(courtNo) - 1;
-                if (i === targetIndex) {
-                    const name = item.split(':')[0];
-                    return `${name}:0`;
-                }
-                return item;
-            });
-
-            await tx.sport.update({
-                where: { id: sport.id },
-                data: {
-                    courtsInUse: Math.max(0, (sport.courtsInUse || 0) - 1),
-                    numPlayers: Math.max(0, (sport.numPlayers || 0) - (booking.numberOfPlayers || 0)),
-                    courtData: newCourtData
-                }
-            });
-
             await tx.booking.update({
                 where: { id: bookingId },
-                data: { status: 'returned' }
+                data: { status: 'completed', endAt: endedAt }
             });
+            if (booking.status === 'active' || booking.scanned) {
+                await restoreBookingEquipment(tx, bookingId);
+            }
         });
 
         revalidatePath('/')
@@ -321,16 +299,16 @@ export async function requestReturn(bookingId: string): Promise<ActionResponse> 
         revalidatePath('/book-court')
 
 
-        const [bookingForSport]: any = await prisma.$queryRaw`SELECT "sportName" FROM "Booking" WHERE "id" = ${bookingId}`;
+        const bookingForSport: any = await prisma.booking.findUnique({ where: { id: bookingId }, include: { sport: true } });
         if (bookingForSport) {
-            await notifySocketUpdate(bookingForSport.sportName, 'availability_changed');
+            await notifySportUpdate(bookingForSport.sport.name, 'availability_changed');
         }
 
         return { success: true, data: null }
     }
     catch (error: any) {
-        console.error('Request return error:', error)
-        return { success: false, error: error.message || 'Failed to request return' }
+        console.error('Complete booking error:', error)
+        return { success: false, error: error.message || 'Failed to complete booking' }
     }
 }
 
@@ -339,13 +317,13 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
         await ensureAdmin()
         const result = await prisma.$transaction(async (tx: any) => {
             const existingBooking = await tx.booking.findFirst({
-                where: { userId: data.userId, status: { in: ['pending', 'active', 'returned'] } }
+                where: { userId: data.userId, status: { in: ['pending', 'active', 'expired'] } }
             })
             if (existingBooking) {
-                const msg = existingBooking.status === 'active'
+                const msg = existingBooking.status === 'active' || existingBooking.status === 'expired'
                     ? 'You already have an active booking.'
-                    : 'Your previous session return is pending admin approval.';
-                throw new Error(`${msg} Please return items and wait for admin approval first.`)
+                    : 'You already have a pending booking.';
+                throw new Error(`${msg} Please complete it before booking again.`)
             }
 
             const [sport]: any = await tx.$queryRaw`SELECT * FROM "Sport" WHERE "name" = ${data.sportName} FOR UPDATE`;
@@ -353,7 +331,8 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
                 throw new Error('Sport not found.')
             }
             const isCapacityBased = sport.maxCapacity && sport.maxCapacity > 0
-            const alreadyBookedPlayers = sport.numPlayers || 0
+            const activeBookings = await tx.booking.findMany({ where: { sportId: sport.id, status: { in: ['pending', 'active'] } } })
+            const alreadyBookedPlayers = activeBookings.reduce((sum: number, booking: any) => sum + (booking.numberOfPlayers || 0), 0)
             const numPlayers = positiveInt(data.numberOfPlayers, 'Number of players')
             const courtNo = data.CourtNo
             if (isCapacityBased) {
@@ -362,28 +341,15 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
                 }
             }
             else {
-                const cData = sport.courtData || []
                 const courtIndex = parseInt(courtNo) - 1
                 if (courtIndex < 0 || courtIndex >= (sport.numberOfCourts || 0)) {
                     throw new Error('Court is not available!')
                 }
-                if (cData[courtIndex] && cData[courtIndex].split(':')[1] === '1') {
+                const requestedCourt = await resolveCourtByNo(tx, sport.id, courtNo)
+                const occupied = requestedCourt ? activeBookings.some((booking: any) => booking.courtId === requestedCourt.id) : false
+                if (occupied) {
                     throw new Error('Court already booked!')
                 }
-
-                const currentCData = Array.from({ length: sport.numberOfCourts || 0 }, (_, i) => cData[i] || `Court${i + 1}:0`)
-                const newCourtData = currentCData.map((item: any, i: number) => {
-                    const name = item.split(':')[0]
-                    if (i === courtIndex) return `${name}:1`
-                    return item
-                })
-
-                await tx.sport.update({
-                    where: { id: sport.id },
-                    data: {
-                        courtsInUse: { increment: 1 }, courtData: newCourtData, numPlayers: { increment: numPlayers }
-                    }
-                })
             }
             const bookingEquipmentData = [];
             if (data.equipmentsIssued && data.equipmentsIssued.length > 0) {
@@ -412,37 +378,36 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
                     });
                 }
             }
-            else if (isCapacityBased) {
-                await tx.sport.update({
-                    where: { id: sport.id }, data: { numPlayers: { increment: numPlayers } }
-                })
-            }
 
+            const court = await resolveCourtByNo(tx, sport.id, data.CourtNo)
             const booking = await tx.booking.create({
                 data: {
                     userId: requiredString(data.userId, 'User ID'),
-                    sportName: requiredString(data.sportName, 'Sport name'),
+                    sportId: sport.id,
+                    courtId: court?.id,
                     numberOfPlayers: numPlayers,
-                    startTime: requiredString(data.startTime, 'Start time', 20),
-                    endTime: requiredString(data.endTime, 'End time', 20),
-                    date: requiredString(data.date, 'Date', 20),
+                    startAt: parseBookingDateTime(requiredString(data.date, 'Date', 20), requiredString(data.startTime, 'Start time', 20)),
+                    endAt: parseBookingDateTime(requiredString(data.enddate || data.date, 'End date', 20), requiredString(data.endTime, 'End time', 20)),
                     qrDetail: data.qrdetail,
                     status: bookingStatus(data.status),
-                    endDate: data.enddate,
-                    courtNo: data.CourtNo,
                     BookingEquipment: {
                         create: bookingEquipmentData
                     }
                 },
+                include: { sport: true, court: true },
             })
-            return booking
+            return await tx.booking.update({
+                where: { id: booking.id },
+                data: buildSignedQrUpdate(booking, data.qrdetail),
+                include: { sport: true, court: true },
+            })
         })
         revalidatePath('/')
 
 
-        await notifySocketUpdate(data.sportName, 'booking_status_changed');
+        await notifySportUpdate(data.sportName, 'booking_status_changed');
 
-        return { success: true, data: result }
+        return { success: true, data: withBookingDisplay(result) }
     }
     catch (error: any) {
         console.error('Secure booking error:', error)
@@ -452,98 +417,186 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
 
 import { getISTDate, formatISTTime } from '@/lib/utils';
 
-export async function activateBooking(bookingId: string) {
+export async function activateBooking(qrData: string) {
     try {
         await ensureRoles([ROLES.ADMIN, ROLES.GUARD])
+        const scannedPayload = parseBookingQrPayload(qrData)
         const result = await prisma.$transaction(async (tx: any) => {
+            const bookingId = scannedPayload.bookingId
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
             if (!booking) throw new Error('Booking not found');
             if (booking.status !== 'pending') throw new Error('Booking is not in pending state');
+            if (new Date(booking.endAt).getTime() <= Date.now()) {
+                await tx.booking.update({ where: { id: bookingId }, data: { status: 'expired' } });
+                await restoreBookingEquipment(tx, bookingId);
+                throw new Error('Booking expired before QR scan.');
+            }
+            verifyBookingQrPayload(qrData, {
+                bookingId: booking.id,
+                userId: booking.userId,
+                sportId: booking.sportId,
+                numberOfPlayers: booking.numberOfPlayers,
+                startAt: booking.startAt,
+                endAt: booking.endAt,
+                courtId: booking.courtId,
+                qrHash: booking.qrHash,
+            })
 
 
-            const dummyDate = '2000-01-01';
-            const start = new Date(`${dummyDate}T${booking.startTime}`);
-            const end = new Date(`${booking.endDate && booking.endDate !== booking.date ? '2000-01-02' : dummyDate}T${booking.endTime}`);
+            const start = new Date(booking.startAt);
+            const end = new Date(booking.endAt);
             const durationMs = end.getTime() - start.getTime();
 
             const istNow = getISTDate();
-            const { time: newStartTime, date: newDateStr } = formatISTTime(istNow);
-
             const istEnd = new Date(istNow.getTime() + durationMs);
-            const { time: newEndTime, date: newEndDateStr } = formatISTTime(istEnd);
 
             return await tx.booking.update({
                 where: { id: bookingId },
                 data: {
                     status: 'active',
                     scanned: true,
-                    startTime: newStartTime,
-                    endTime: newEndTime,
-                    endDate: newEndDateStr,
-                    date: newDateStr
-                }
+                    startAt: istNow,
+                    endAt: istEnd,
+                },
+                include: { sport: true, court: true },
             });
         });
 
         revalidatePath('/admin/bookings');
 
-        await notifySocketUpdate(result.sportName, 'availability_changed');
+        await notifySportUpdate(result.sport.name, 'availability_changed');
 
-        return { success: true, data: result };
+        return { success: true, data: withBookingDisplay(result) };
     } catch (error: any) {
         console.error('Activate booking error:', error);
         return { success: false, error: error.message || 'Failed to activate booking' };
     }
 }
 
+function buildSignedQrUpdate(booking: any, qrDetail?: string) {
+    const payload = createBookingQrPayload({
+        bookingId: booking.id,
+        userId: booking.userId,
+        sportId: booking.sportId,
+        numberOfPlayers: booking.numberOfPlayers,
+        startAt: booking.startAt,
+        endAt: booking.endAt,
+        courtId: booking.courtId,
+    })
+
+    return {
+        qrDetail: JSON.stringify(payload),
+        qrHash: payload.h,
+    }
+}
+
+function withBookingQrDisplay(booking: any) {
+    const displayBooking = withBookingDisplay(booking)
+    const payload = createBookingQrPayload({
+        bookingId: booking.id,
+        userId: booking.userId,
+        sportId: booking.sportId,
+        numberOfPlayers: booking.numberOfPlayers,
+        startAt: booking.startAt,
+        endAt: booking.endAt,
+        courtId: booking.courtId,
+    })
+
+    return {
+        ...displayBooking,
+        qrDetail: JSON.stringify(payload),
+    }
+}
+
+async function restoreBookingEquipment(tx: any, bookingId: string) {
+    const bookingEquipments = await tx.bookingEquipment.findMany({ where: { bookingId } });
+    for (const be of bookingEquipments) {
+        await tx.equipment.update({
+            where: { id: be.equipmentId },
+            data: { inUse: { decrement: be.count } }
+        });
+    }
+}
+
+async function expireOverdueBookings() {
+    const now = getISTDate()
+    await prisma.$transaction(async (tx: any) => {
+        const overduePendingBookings = await tx.booking.findMany({
+            where: { status: 'pending', endAt: { lte: now } },
+            select: { id: true },
+        })
+
+        for (const booking of overduePendingBookings) {
+            await tx.booking.update({ where: { id: booking.id }, data: { status: 'expired' } })
+            await restoreBookingEquipment(tx, booking.id)
+        }
+
+        await tx.booking.updateMany({
+            where: { status: 'active', endAt: { lte: now } },
+            data: { status: 'expired' },
+        })
+    })
+}
+
 export async function AddGymQRLog(UserGymId : string) {
     try {
-        await ensureAdmin();
-        const ExitTime = getISTDate();
-        console.log("ExitTime: ", ExitTime);
-        try{
-            const result = await prisma.$transaction(async (tx: any) => {
+        await ensureRoles([ROLES.ADMIN, ROLES.GUARD]);
+        const now = getISTDate();
+        const result = await prisma.$transaction(async (tx: any) => {
             const existingLog = await tx.gymLog.findFirst({
                 where: {
                     userId: UserGymId,
                     status: { in: ['active'] }
                 }
             })
-            console.log("Existing Log: ", existingLog);
             if(existingLog) {
-                const bookingId = existingLog.id;
-                const log = await prisma.gymLog.update({
-                    where: { 
-                        id: bookingId,
-                        status: { in: ['active'] }
-                     },
+                const durationHours = parseFloat(((now.getTime() - new Date(existingLog.entryTime).getTime()) / (1000 * 60 * 60)).toFixed(2))
+                const log = await tx.gymLog.update({
+                    where: { id: existingLog.id },
                     data: { 
                         status: 'completed',
-                        exitTime: ExitTime,
-                        updatedAt: ExitTime,
+                        exitTime: now,
+                        duration: durationHours,
+                        updatedAt: now,
                     }
                 })
-                return {success: true, data: log};
+                return withGymScanDisplay('finished', log);
             }
-            const log = await prisma.gymLog.create({
+
+            const log = await tx.gymLog.create({
                 data: {
                     id: uuidv4(),
                     userId: UserGymId,
-                    entryTime: ExitTime,
+                    entryTime: now,
                     status: 'active',
-                    createdAt: ExitTime,
-                    updatedAt: ExitTime,
+                    createdAt: now,
+                    updatedAt: now,
                 }
             })
+            return withGymScanDisplay('created', log);
         })
-        console.log("Booking.ts result: ", result);
+        revalidatePath('/gym-scanner')
         return {success: true, data: result};
     }
-    catch(err: any){
-        console.log("Error in AddGymQRLog: ", err);
-        return {success: false, error: err.message || 'Failed to add gym QR log'};
-    }
-    }
     catch (error: any) {
+        console.error("Error in AddGymQRLog: ", error);
+        return {success: false, error: error.message || 'Failed to process gym QR'};
+    }
+}
+
+function withGymScanDisplay(action: 'created' | 'finished', log: any) {
+    const entry = formatISTTime(new Date(log.entryTime))
+    const exit = log.exitTime ? formatISTTime(new Date(log.exitTime)) : null
+
+    return {
+        action,
+        message: action === 'created' ? 'Gym booking created' : 'Gym booking finished',
+        id: log.id,
+        status: log.status,
+        entryDate: entry.date,
+        entryTime: entry.time,
+        exitDate: exit?.date || null,
+        exitTime: exit?.time || null,
+        duration: log.duration ? `${log.duration} h` : null,
     }
 }

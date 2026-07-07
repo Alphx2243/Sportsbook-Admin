@@ -6,48 +6,10 @@ import bcrypt from 'bcryptjs'
 import type { ActionResponse } from '@/types/interfaces'
 import { ensureAdmin, ensureRoles, publicUserSelect } from '@/lib/auth-utils'
 import { v4 as uuidv4 } from 'uuid'
-import { requireServerEnv } from '@/lib/env'
 import { equipmentList, matchStatus, nonNegativeInt, requiredString, roleValue } from '@/lib/validation'
 import { ROLES } from '@/lib/roles'
-
-async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
-    const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
-    const secret = requireServerEnv('SOCKET_INTERNAL_SECRET');
-
-    console.log(`[SOCKET] Notifying ${url} for ${sportName} (Type: ${type})`);
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-socket-secret': secret
-            },
-            body: JSON.stringify({ sportName, type }),
-        });
-        if (!response.ok) console.error(`[SOCKET] Server returned ${response.status}`);
-    } catch (error) {
-        console.error('[SOCKET] Failed to notify server:', error);
-    }
-}
-
-async function notifyMatchesUpdate() {
-    const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-matches`;
-    const secret = requireServerEnv('SOCKET_INTERNAL_SECRET');
-
-    console.log(`[SOCKET] Notifying ${url} for matches update`);
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-socket-secret': secret
-            },
-        });
-        if (!response.ok) console.error(`[SOCKET] Server returned ${response.status}`);
-    } catch (error) {
-        console.error('[SOCKET] Failed to notify matches server:', error);
-    }
-}
+import { resolveSportByName, syncCourtsForSport, withMatchDisplay, withUserDisplay } from '@/lib/normalized-data'
+import { notifyMatchesUpdate } from '@/lib/socket-notify'
 
 export async function getAdminStats(): Promise<ActionResponse> {
     try {
@@ -56,7 +18,7 @@ export async function getAdminStats(): Promise<ActionResponse> {
             prisma.user.count(),
             prisma.booking.count(),
             prisma.sport.count(),
-            prisma.booking.count({ where: { status: { in: ['active', 'returned'] } } })
+            prisma.booking.count({ where: { status: { in: ['active', 'expired'] } } })
         ])
 
         return {
@@ -77,11 +39,11 @@ export async function getAdminStats(): Promise<ActionResponse> {
 export async function getAllUsers(): Promise<ActionResponse> {
     try {
         await ensureAdmin();
-        const users = await prisma.user.findMany({
+        const usersWithExperience = await prisma.user.findMany({
             orderBy: { createdAt: 'desc' },
-            select: publicUserSelect,
+            select: { ...publicUserSelect, sportExperiences: { include: { sport: true } } },
         })
-        return { success: true, data: users }
+        return { success: true, data: usersWithExperience.map(withUserDisplay) }
     } catch (error: any) {
         return { success: false, error: error.message }
     }
@@ -100,7 +62,7 @@ export async function createUser(data: any): Promise<ActionResponse> {
                 password: hashedPassword,
                 phone: requiredString(data.phone, 'Phone', 30),
                 rollNumber: requiredString(data.rollNumber, 'Roll number', 50),
-                role: roleValue(data.role)
+                role: roleValue(data.role) as any
             },
             select: publicUserSelect,
         })
@@ -117,7 +79,7 @@ export async function updateUserRole(userId: string, role: string): Promise<Acti
         await ensureAdmin();
         await prisma.user.update({
             where: { id: userId },
-            data: { role: roleValue(role) }
+            data: { role: roleValue(role) as any }
         })
         revalidatePath('/admin/users')
         return { success: true, data: null }
@@ -142,66 +104,24 @@ export async function deleteUser(userId: string): Promise<ActionResponse> {
     }
 }
 
-export async function approveReturn(bookingId: string): Promise<ActionResponse> {
-    try {
-        await ensureRoles([ROLES.ADMIN, ROLES.GUARD]);
-        await prisma.$transaction(async (tx: any) => {
-            const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
-            if (!booking || booking.status !== 'returned') {
-                throw new Error('Booking not found or not in returned state');
-            }
-
-            const [sport]: any = await tx.$queryRaw`SELECT * FROM "Sport" WHERE "name" = ${booking.sportName} FOR UPDATE`;
-            if (!sport) {
-                throw new Error('Associated Sport not found');
-            }
-
-            await tx.booking.update({
-                where: { id: bookingId },
-                data: { status: 'expired' }
-            });
-
-            const bookingEquipments = await tx.bookingEquipment.findMany({
-                where: { bookingId }
-            });
-
-            for (const be of bookingEquipments) {
-                await tx.equipment.update({
-                    where: { id: be.equipmentId },
-                    data: { inUse: { decrement: be.count } }
-                });
-            }
-        });
-
-        revalidatePath('/admin/bookings')
-        revalidatePath('/dashboard')
-
-        const booking: any = await prisma.booking.findUnique({ where: { id: bookingId } })
-        if (booking) {
-            await notifySocketUpdate(booking.sportName, 'availability_changed');
-        }
-
-        return { success: true, data: null }
-    } catch (error: any) {
-        console.error('Approve return error:', error)
-        return { success: false, error: error.message }
-    }
-}
-
 export async function updateSportInventory(sportId: string, data: any): Promise<ActionResponse> {
     try {
         await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER]);
         const parsedEquipment = data.totalEquipments ? equipmentList(data.totalEquipments) : undefined
         await prisma.$transaction(async (tx: any) => {
-            await tx.sport.update({
+            const updatedSport = await tx.sport.update({
                 where: { id: sportId },
                 data: {
                     numberOfCourts: data.numberOfCourts !== undefined ? nonNegativeInt(data.numberOfCourts, 'Number of courts') : undefined,
                     maxCapacity: data.maxCapacity !== undefined ? nonNegativeInt(data.maxCapacity, 'Max capacity') : undefined,
-                    courtsInUse: data.courtsInUse !== undefined ? nonNegativeInt(data.courtsInUse, 'Courts in use') : undefined,
-                    numPlayers: data.numPlayers !== undefined ? nonNegativeInt(data.numPlayers, 'Active players') : undefined,
                 }
             })
+            await syncCourtsForSport(
+                tx,
+                sportId,
+                data.numberOfCourts !== undefined ? nonNegativeInt(data.numberOfCourts, 'Number of courts') : updatedSport.numberOfCourts,
+                data.CourtData
+            )
 
             if (parsedEquipment) {
                 const existingEqs = await tx.equipment.findMany({ where: { sportId } });
@@ -250,9 +170,10 @@ export async function getAllMatches(): Promise<ActionResponse> {
     try {
         await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER]);
         const matches = await prisma.match.findMany({
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
+            include: { sport: true },
         })
-        return { success: true, data: matches }
+        return { success: true, data: matches.map(withMatchDisplay) }
     } catch (error: any) {
         return { success: false, error: error.message }
     }
@@ -261,20 +182,21 @@ export async function getAllMatches(): Promise<ActionResponse> {
 export async function createMatch(data: any): Promise<ActionResponse> {
     try {
         await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER]);
+        const sport = await resolveSportByName(prisma, requiredString(data.sportName, 'Sport name'))
         const match = await prisma.match.create({
             data: {
-                sportName: requiredString(data.sportName, 'Sport name'),
+                sportId: sport.id,
                 team1: requiredString(data.team1, 'Team 1'),
                 team2: requiredString(data.team2, 'Team 2'),
                 score1: nonNegativeInt(data.score1, 'Score 1', 0).toString(),
                 score2: nonNegativeInt(data.score2, 'Score 2', 0).toString(),
-                status: matchStatus(data.status)
+                status: matchStatus(data.status) as any
             }
         })
         revalidatePath('/admin/matches')
         revalidatePath('/live-scores')
         await notifyMatchesUpdate();
-        return { success: true, data: match }
+        return { success: true, data: withMatchDisplay({ ...match, sport }) }
     } catch (error: any) {
         return { success: false, error: error.message }
     }
@@ -288,7 +210,7 @@ export async function updateMatch(matchId: string, data: any): Promise<ActionRes
             data: {
                 score1: data.score1 !== undefined ? nonNegativeInt(data.score1, 'Score 1').toString() : undefined,
                 score2: data.score2 !== undefined ? nonNegativeInt(data.score2, 'Score 2').toString() : undefined,
-                status: data.status !== undefined ? matchStatus(data.status) : undefined,
+                status: data.status !== undefined ? matchStatus(data.status) as any : undefined,
                 team1: data.team1 !== undefined ? requiredString(data.team1, 'Team 1') : undefined,
                 team2: data.team2 !== undefined ? requiredString(data.team2, 'Team 2') : undefined,
             }

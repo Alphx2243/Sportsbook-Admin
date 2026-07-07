@@ -13,6 +13,7 @@ import { requireServerEnv } from '@/lib/env'
 import { fail, ok } from '@/lib/action-response'
 import { requiredEmail, requiredString } from '@/lib/validation'
 import { isPortalRole, normalizeRole, ROLES } from '@/lib/roles'
+import { syncUserSportExperiences, withUserDisplay } from '@/lib/normalized-data'
 
 const PASSWORD_MIN_LENGTH = 12
 const PASSWORD_RESET_RESPONSE = 'If an account exists with this email, a reset link has been sent.'
@@ -73,15 +74,18 @@ export async function updateUser(userId: string, data: {
             throw new Error('Unauthorized.')
         }
 
-        const user = await prisma.user.update({
-            where: { id: userId },
-            data: {
-                name: data.name !== undefined ? requiredString(data.name, 'Name') : undefined,
-                phone: data.phone !== undefined ? requiredString(data.phone, 'Phone', 30) : undefined,
-                rollNumber: data.rollNumber !== undefined ? requiredString(data.rollNumber, 'Roll number', 50) : undefined,
-                sportsExperience: data.sportsExperience,
-            },
-            select: publicUserSelect,
+        const user = await prisma.$transaction(async (tx: any) => {
+            const updatedUser = await tx.user.update({
+                where: { id: userId },
+                data: {
+                    name: data.name !== undefined ? requiredString(data.name, 'Name') : undefined,
+                    phone: data.phone !== undefined ? requiredString(data.phone, 'Phone', 30) : undefined,
+                    rollNumber: data.rollNumber !== undefined ? requiredString(data.rollNumber, 'Roll number', 50) : undefined,
+                },
+            });
+            await syncUserSportExperiences(tx, userId, data.sportsExperience)
+            const userWithExperience = await tx.user.findUnique({ where: { id: updatedUser.id }, select: publicUserSelect })
+            return withUserDisplay(userWithExperience)
         });
         return ok(user);
     }
@@ -111,10 +115,9 @@ export async function getCurrentUser(): Promise<ActionResponse> {
 export async function getUsers(): Promise<ActionResponse<{ documents: any[], total: number }>> {
     try {
         await ensureAdmin()
-        const users = await prisma.user.findMany({
-            select: publicUserSelect,
-        });
-        return { success: true, data: { documents: users, total: users.length } };
+        const users = await prisma.user.findMany({ select: publicUserSelect });
+        const documents = users.map(withUserDisplay)
+        return { success: true, data: { documents, total: documents.length } };
     }
     catch (error: any) {
         console.error("Get users error:", error);

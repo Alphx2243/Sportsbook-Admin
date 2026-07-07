@@ -4,11 +4,12 @@ import React, { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
     CheckCircle2,
-    AlertCircle, Loader2, Camera, Info,
+    AlertCircle, Camera, Info,
     QrCode, Upload
 } from 'lucide-react'
-import { Html5Qrcode } from 'html5-qrcode'
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 import { activateBooking } from '@/actions/bookings'
+import jsQR from 'jsqr'
 
 export default function BookingScannerPage() {
     const [isScanning, setIsScanning] = useState(false)
@@ -16,7 +17,6 @@ export default function BookingScannerPage() {
     const [result, setResult] = useState<any>(null)
     const [error, setError] = useState('')
     const scannerRef = useRef<Html5Qrcode | null>(null)
-    const [manualId, setManualId] = useState('')
     const fileInputRef = useRef<HTMLInputElement>(null)
 
     useEffect(() => {
@@ -28,12 +28,13 @@ export default function BookingScannerPage() {
     }, [])
 
     const startScanner = async () => {
+        if (isScanning || isProcessing) return
         setIsScanning(true)
         setError('')
         setResult(null)
 
         setTimeout(() => {
-            const scanner = new Html5Qrcode("reader")
+            const scanner = createQrScanner("reader")
             scannerRef.current = scanner
             scanner.start(
                 { facingMode: "environment" },
@@ -46,19 +47,21 @@ export default function BookingScannerPage() {
             ).catch(err => {
                 console.error("Scanner start error:", err)
                 setError("Could not access camera. Please check permissions.")
+                scannerRef.current = null
                 setIsScanning(false)
             })
         }, 100)
     }
 
     const stopScanner = async () => {
-        if (scannerRef.current && scannerRef.current.isScanning) {
+        if (scannerRef.current?.isScanning) {
              try {
                 await scannerRef.current.stop()
             } catch (err) {
                 console.error("Scanner stop error:", err)
             }
         }
+        scannerRef.current = null
         setIsScanning(false)
     }
 
@@ -78,15 +81,19 @@ export default function BookingScannerPage() {
         setError('')
         setResult(null)
 
-        const html5QrCode = new Html5Qrcode("reader-hidden")
+        const html5QrCode = createQrScanner("reader-hidden")
         try {
-            const decodedText = await html5QrCode.scanFile(file, true)
-            processScannedData(decodedText)
+            const decodedText = await decodeQrImage(html5QrCode, file)
+            await processScannedData(decodedText)
         } catch (err) {
             console.error("QR Upload Error:", err)
-            setError("Could not find a valid QR code in this image. Please try another one.")
+            setError("Could not read a booking QR from this image. Upload a clear screenshot/crop of the booking QR, or use the camera scanner.")
         } finally {
             setIsProcessing(false)
+            try {
+                html5QrCode.clear()
+            } catch {
+            }
             if (fileInputRef.current) fileInputRef.current.value = ''
         }
     }
@@ -95,18 +102,9 @@ export default function BookingScannerPage() {
         setIsProcessing(true)
         setError('')
         try {
-            let bookingId = data
-            
-            try {
-                const parsed = JSON.parse(data)
-                if (parsed.bookingId) bookingId = parsed.bookingId
-            } catch (e) {
-            }
-
-            const res = await activateBooking(bookingId)
+            const res = await activateBooking(data)
             if (res.success) {
                 setResult(res.data)
-                setManualId('')
             } else {
                 setError(res.error || 'Failed to activate booking')
             }
@@ -115,13 +113,6 @@ export default function BookingScannerPage() {
             console.error(err)
         } finally {
             setIsProcessing(false)
-        }
-    }
-
-    const handleManualSubmit = (e: React.FormEvent) => {
-        e.preventDefault()
-        if (manualId.trim()) {
-            processScannedData(manualId.trim())
         }
     }
 
@@ -195,33 +186,18 @@ export default function BookingScannerPage() {
                     </motion.div>
 
                     <div className="space-y-8">
-                        <motion.div 
+                        <motion.div
                             initial={{ x: 20, opacity: 0 }}
                             animate={{ x: 0, opacity: 1 }}
                             className="glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl"
                         >
                             <h3 className="text-xl font-bold flex items-center gap-3 mb-6">
                                 <Info className="w-5 h-5 text-primary" />
-                                Manual Entry
+                                Secure QR Only
                             </h3>
-                            <form onSubmit={handleManualSubmit} className="space-y-4">
-                                <div className="relative">
-                                    <QrCode className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 w-5 h-5" />
-                                    <input 
-                                        type="text" 
-                                        value={manualId}
-                                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setManualId(e.target.value)}
-                                        placeholder="Enter Booking ID manually..."
-                                        className="w-full pl-12 pr-4 py-4 bg-white/5 border border-white/10 rounded-2xl focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all font-bold"
-                                    />
-                                </div>
-                                <button 
-                                    disabled={isProcessing || !manualId.trim()}
-                                    className="w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-foreground font-black rounded-2xl transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs"
-                                >
-                                    {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Process ID'}
-                                </button>
-                            </form>
+                            <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-sm font-medium text-gray-400">
+                                Booking activation requires the signed booking QR. Booking IDs and manually typed text are not accepted.
+                            </div>
                         </motion.div>
 
                         <AnimatePresence mode="wait">
@@ -283,7 +259,146 @@ export default function BookingScannerPage() {
                     </div>
                 </div>
             </div>
-            <div id="reader-hidden" className="hidden"></div>
+            <div
+                id="reader-hidden"
+                className="fixed -left-[9999px] top-0 h-[420px] w-[420px] overflow-hidden opacity-0 pointer-events-none"
+            ></div>
         </main>
     )
+}
+
+function createQrScanner(elementId: string) {
+    return new Html5Qrcode(elementId, {
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        useBarCodeDetectorIfSupported: true,
+        verbose: false,
+    })
+}
+
+async function decodeQrImage(scanner: Html5Qrcode, file: File) {
+    const jsQrDetected = await decodeWithJsQr(file)
+    if (jsQrDetected) return jsQrDetected
+
+    const browserDetected = await decodeWithBrowserBarcodeDetector(file)
+    if (browserDetected) return browserDetected
+
+    try {
+        return await scanner.scanFile(file, true)
+    } catch (originalError) {
+        const preparedFiles = await prepareImageVariantsForQrScan(file)
+        for (const preparedFile of preparedFiles) {
+            const jsQrVariantDetected = await decodeWithJsQr(preparedFile)
+            if (jsQrVariantDetected) return jsQrVariantDetected
+
+            const detected = await decodeWithBrowserBarcodeDetector(preparedFile)
+            if (detected) return detected
+
+            try {
+                return await scanner.scanFile(preparedFile, true)
+            } catch {
+            }
+        }
+        throw originalError
+    }
+}
+
+async function decodeWithJsQr(file: File) {
+    const imageData = await fileToImageData(file)
+    if (!imageData) return null
+
+    const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: 'attemptBoth',
+    })
+
+    return code?.data || null
+}
+
+async function fileToImageData(file: File) {
+    const bitmap = await createImageBitmap(file).catch(() => null)
+    if (!bitmap) return null
+
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    if (!context) return null
+
+    context.drawImage(bitmap, 0, 0)
+    return context.getImageData(0, 0, canvas.width, canvas.height)
+}
+
+async function prepareImageVariantsForQrScan(file: File) {
+    const bitmap = await createImageBitmap(file).catch(() => null)
+    if (!bitmap) return []
+
+    const variants: File[] = []
+    const fullImage = await renderBitmapToFile(bitmap, 2400)
+    if (fullImage) variants.push(fullImage)
+
+    const centerCrop = await renderBitmapCropToFile(bitmap, 0.15, 0.15, 0.7, 0.7, 1800)
+    if (centerCrop) variants.push(centerCrop)
+
+    const lowerCrop = await renderBitmapCropToFile(bitmap, 0, 0.2, 1, 0.8, 2200)
+    if (lowerCrop) variants.push(lowerCrop)
+
+    return variants
+}
+
+async function decodeWithBrowserBarcodeDetector(file: File) {
+    const BarcodeDetectorCtor = (window as WindowWithBarcodeDetector).BarcodeDetector
+    if (!BarcodeDetectorCtor) return null
+
+    const bitmap = await createImageBitmap(file).catch(() => null)
+    if (!bitmap) return null
+
+    try {
+        const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] })
+        const results = await detector.detect(bitmap)
+        return results[0]?.rawValue || null
+    } catch {
+        return null
+    }
+}
+
+async function renderBitmapToFile(bitmap: ImageBitmap, targetSide: number) {
+    return renderBitmapCropToFile(bitmap, 0, 0, 1, 1, targetSide)
+}
+
+async function renderBitmapCropToFile(
+    bitmap: ImageBitmap,
+    xRatio: number,
+    yRatio: number,
+    widthRatio: number,
+    heightRatio: number,
+    targetSide: number
+) {
+    const sourceX = Math.round(bitmap.width * xRatio)
+    const sourceY = Math.round(bitmap.height * yRatio)
+    const sourceWidth = Math.round(bitmap.width * widthRatio)
+    const sourceHeight = Math.round(bitmap.height * heightRatio)
+    const scale = targetSide / Math.max(sourceWidth, sourceHeight)
+    const width = Math.max(1, Math.round(sourceWidth * scale))
+    const height = Math.max(1, Math.round(sourceHeight * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+
+    const context = canvas.getContext('2d')
+    if (!context) return null
+
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, width, height)
+    context.imageSmoothingEnabled = false
+    context.drawImage(bitmap, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height)
+
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+    if (!blob) return null
+
+    return new File([blob], 'booking-qr.png', { type: 'image/png' })
+}
+
+type WindowWithBarcodeDetector = Window & {
+    BarcodeDetector?: new (options?: { formats?: string[] }) => {
+        detect: (image: ImageBitmapSource) => Promise<Array<{ rawValue: string }>>
+    }
 }

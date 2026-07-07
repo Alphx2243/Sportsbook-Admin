@@ -5,58 +5,41 @@ import { revalidatePath } from 'next/cache'
 import { ActionResponse } from '@/types/interfaces'
 import { v4 as uuidv4 } from 'uuid'
 import { ensureRoles } from '@/lib/auth-utils'
-import { requireServerEnv } from '@/lib/env'
 import { equipmentList, nonNegativeInt, requiredString } from '@/lib/validation'
 import { ROLES } from '@/lib/roles'
-
-async function notifySocketUpdate(sportName: string, type: string = 'availability_changed') {
-    const url = `${process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3005'}/notify-update`;
-    const secret = requireServerEnv('SOCKET_INTERNAL_SECRET');
-
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-socket-secret': secret
-            },
-            body: JSON.stringify({ sportName, type }),
-        });
-        if (!response.ok) console.error(`[SOCKET] Server returned ${response.status}`);
-    } catch (error) {
-        console.error('[SOCKET] Failed to notify server:', error);
-    }
-}
+import { dateToDateString, dateToTimeString, getISTDayRange, parseBookingDateTime, syncCourtsForSport, withSportAvailability } from '@/lib/normalized-data'
+import { notifySportUpdate } from '@/lib/socket-notify'
 
 export async function createSport(data: any): Promise<ActionResponse> {
     try {
         await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const equipments = equipmentList(data.totalEquipments)
         const numberOfCourts = nonNegativeInt(data.courts, 'Number of courts')
-        const sport = await prisma.sport.create({
-            data: {
-                name: requiredString(data.name, 'Sport name'),
-                numberOfCourts,
-                courtsInUse: nonNegativeInt(data.crtinuse, 'Courts in use', 0),
-                numPlayers: nonNegativeInt(data.numplayers, 'Active players', 0),
-                courtData: data.CourtData,
-                maxCapacity: data.maxCapacity ? nonNegativeInt(data.maxCapacity, 'Max capacity') : null,
-                Equipment: {
-                    create: equipments.map((eq) => {
-                        return {
-                            id: uuidv4(),
-                            name: eq.name,
-                            total: eq.total,
-                            inUse: 0,
-                            updatedAt: new Date()
-                        }
-                    })
-                }
-            },
-            include: { Equipment: true }
+        const sport = await prisma.$transaction(async (tx: any) => {
+            const createdSport = await tx.sport.create({
+                data: {
+                    name: requiredString(data.name, 'Sport name'),
+                    numberOfCourts,
+                    maxCapacity: data.maxCapacity ? nonNegativeInt(data.maxCapacity, 'Max capacity') : null,
+                    Equipment: {
+                        create: equipments.map((eq) => {
+                            return {
+                                id: uuidv4(),
+                                name: eq.name,
+                                total: eq.total,
+                                inUse: 0,
+                                updatedAt: new Date()
+                            }
+                        })
+                    }
+                },
+                include: { Equipment: true }
+            })
+            await syncCourtsForSport(tx, createdSport.id, numberOfCourts, data.CourtData)
+            return createdSport
         })
         revalidatePath('/')
-        await notifySocketUpdate(sport.name);
+        await notifySportUpdate(sport.name);
         return { success: true, data: sport }
     }
     catch (error: any) {
@@ -75,12 +58,15 @@ export async function updateSport(id: string, data: any): Promise<ActionResponse
                 data: {
                     name: data.name !== undefined ? requiredString(data.name, 'Sport name') : undefined,
                     numberOfCourts: data.courts !== undefined ? nonNegativeInt(data.courts, 'Number of courts') : undefined,
-                    courtsInUse: data.crtinuse !== undefined ? nonNegativeInt(data.crtinuse, 'Courts in use') : undefined,
-                    numPlayers: data.numplayers !== undefined ? nonNegativeInt(data.numplayers, 'Active players') : undefined,
-                    courtData: data.CourtData,
                     maxCapacity: data.maxCapacity !== undefined ? nonNegativeInt(data.maxCapacity, 'Max capacity') : undefined,
                 },
             })
+            await syncCourtsForSport(
+                tx,
+                id,
+                data.courts !== undefined ? nonNegativeInt(data.courts, 'Number of courts') : updatedSport.numberOfCourts,
+                data.CourtData
+            )
 
             if (parsedEquipment) {
                 const existingEqs = await tx.equipment.findMany({ where: { sportId: id } });
@@ -121,7 +107,7 @@ export async function updateSport(id: string, data: any): Promise<ActionResponse
         });
 
         revalidatePath('/')
-        await notifySocketUpdate(sport.name);
+        await notifySportUpdate(sport.name);
         return { success: true, data: sport }
     }
     catch (error: any) {
@@ -134,7 +120,7 @@ export async function deleteSport(id: string): Promise<ActionResponse> {
         await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const sport = await prisma.sport.delete({ where: { id }, })
         revalidatePath('/')
-        await notifySocketUpdate(sport.name);
+        await notifySportUpdate(sport.name);
         return { success: true, data: null }
     }
     catch (error: any) {
@@ -147,10 +133,10 @@ export async function getSport(id: string): Promise<ActionResponse> {
         await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const sport = await prisma.sport.findUnique({
             where: { id },
-            include: { Equipment: true }
+            include: { Equipment: true, courts: { where: { isActive: true }, orderBy: { courtNumber: 'asc' } } }
         })
         if (!sport) return { success: false, error: 'Sport not found' }
-        return { success: true, data: sport }
+        return { success: true, data: await withSportAvailability(prisma, sport) }
     }
     catch (error: any) {
         console.error('Get sport error:', error);
@@ -163,9 +149,10 @@ export async function getSports(): Promise<ActionResponse<{ documents: any[], to
         await ensureRoles([ROLES.ADMIN, ROLES.FACILITY_MANAGER])
         const sports = await prisma.sport.findMany({
             orderBy: { name: 'asc' },
-            include: { Equipment: true }
+            include: { Equipment: true, courts: { where: { isActive: true }, orderBy: { courtNumber: 'asc' } } }
         })
-        return { success: true, data: { documents: sports, total: sports.length } }
+        const documents = await Promise.all(sports.map((sport: any) => withSportAvailability(prisma, sport)))
+        return { success: true, data: { documents, total: documents.length } }
     }
     catch (error: any) {
         console.error('Get sports error:', error);
@@ -180,21 +167,22 @@ export async function getSportAnalytics(sportName: string): Promise<ActionRespon
         const dates = Array.from({ length: 7 }, (_: unknown, i: number) => {
             const d = new Date(today);
             d.setDate(today.getDate() - (6 - i));
-            return d.toISOString().split('T')[0];
+            return dateToDateString(d);
         });
+        const startRange = getISTDayRange(dates[0]);
+        const endRange = getISTDayRange(dates[dates.length - 1]);
 
         const bookings = await prisma.booking.findMany({
             where: {
-                sportName: sportName,
-                date: { in: dates }
+                sport: { name: sportName },
+                startAt: { gte: startRange.gte, lt: endRange.lt }
             }
         });
 
-        const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const dayFormatter = new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'Asia/Kolkata' });
         const weeklyAttendance = dates.map((date: string) => {
-            const dateObj = new Date(date);
-            const dayName = days[dateObj.getDay()];
-            const dayBookings = bookings.filter((b: any) => b.date === date);
+            const dayName = dayFormatter.format(parseBookingDateTime(date, '12:00:00'));
+            const dayBookings = bookings.filter((b: any) => dateToDateString(b.startAt) === date);
             const totalPlayers = dayBookings.reduce((sum: number, b: any) => sum + (b.numberOfPlayers || 0), 0);
             return { day: dayName, Students: totalPlayers };
         });
@@ -203,7 +191,7 @@ export async function getSportAnalytics(sportName: string): Promise<ActionRespon
         const peakHours = timeSlots.map((slot: string) => {
             const [startHour, endHour] = slot.split('-').map(Number);
             const slotBookings = bookings.filter((b: any) => {
-                const hour = parseInt(b.startTime.split(':')[0]);
+                const hour = Number(dateToTimeString(b.startAt).split(':')[0]);
                 return hour >= startHour && hour < endHour;
             });
             const totalUsersInSlot = slotBookings.reduce((sum: number, b: any) => sum + (b.numberOfPlayers || 0), 0);

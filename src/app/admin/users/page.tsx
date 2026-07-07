@@ -300,7 +300,7 @@ export default function UsersManagement() {
                             <span className="text-xs font-bold text-muted-foreground/60 w-8">Roll</span> {u.rollNumber}
                           </p>
                           <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                            <span className="text-xs font-bold text-muted-foreground/60 w-12">Joined</span> {new Date(u.createdAt).toLocaleDateString()}
+                            <span className="text-xs font-bold text-muted-foreground/60 w-12">Joined</span> {new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date(u.createdAt))}
                           </p>
                         </div>
                       </div>

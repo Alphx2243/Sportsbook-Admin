@@ -1,15 +1,22 @@
 export function getISTDate(): Date {
-  const now = new Date();
-  
-  const offset = 5.5 * 60 * 60 * 1000;
-  const istDate = new Date(now.getTime() + offset);
-  return istDate;
+  return new Date();
 }
 
 export function formatISTTime(date: Date): { time: string; date: string; isoDate: string } {
-  const isoString = date.toISOString();
-  const [datePart, fullTimePart] = isoString.split('T');
-  const timePart = fullTimePart.split('.')[0];
+  const datePart = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+  const timePart = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
+  }).format(date);
   
   return {
     time: timePart,

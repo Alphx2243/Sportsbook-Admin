@@ -20,14 +20,14 @@ export default function LogoutModal({ isOpen, onClose, onConfirm }: { isOpen: bo
                     animate={{ scale: 1, opacity: 1, y: 0 }}
                     exit={{ scale: 0.9, opacity: 0, y: 20 }}
                     transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                    className="relative w-full max-w-sm overflow-hidden glass-panel rounded-2xl shadow-2xl border border-white/10 mx-auto"
+                    className="relative w-full max-w-sm overflow-hidden bg-card text-card-foreground backdrop-blur-xl rounded-xl shadow-2xl border border-border mx-auto"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div className="h-2 bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500" />
+                    <div className="h-1.5 bg-red-500" />
 
                     <button
                         onClick={onClose}
-                        className="absolute top-4 right-4 p-1 rounded-full hover:bg-white/10 transition-colors text-gray-400 hover:text-white"
+                        className="absolute top-4 right-4 p-1 rounded-full hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
                     >
                         <X size={20} />
                     </button>
@@ -37,23 +37,23 @@ export default function LogoutModal({ isOpen, onClose, onConfirm }: { isOpen: bo
                             <LogOut className="text-red-500" size={32} />
                         </div>
 
-                        <h3 className="text-2xl font-bold text-white mb-2">
+                        <h3 className="text-2xl font-bold text-foreground mb-2">
                             Ready to leave?
                         </h3>
-                        <p className="text-gray-400 mb-8 px-2">
+                        <p className="text-muted-foreground mb-8 px-2">
                             Are you sure you want to log out? You&apos;ll need to log back in to access your bookings.
                         </p>
 
                         <div className="grid grid-cols-2 gap-4">
                             <button
                                 onClick={onClose}
-                                className="px-6 py-3 rounded-xl font-semibold text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-all duration-200"
+                                className="px-6 py-3 rounded-lg font-semibold text-foreground bg-muted hover:bg-muted/80 border border-border transition-all duration-200"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={onConfirm}
-                                className="px-6 py-3 rounded-xl font-bold text-white bg-gradient-to-r from-red-600 to-red-500 hover:from-red-500 hover:to-red-400 shadow-lg shadow-red-900/20 hover:shadow-red-500/30 transition-all duration-200"
+                                className="px-6 py-3 rounded-lg font-bold text-white bg-red-600 hover:bg-red-500 shadow-lg shadow-red-900/20 hover:shadow-red-500/30 transition-all duration-200"
                             >
                                 Logout
                             </button>

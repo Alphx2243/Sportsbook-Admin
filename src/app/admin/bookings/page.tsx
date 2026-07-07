@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
    CalendarCheck,
@@ -9,37 +9,37 @@ import {
    User,
    Loader2,
    CheckCircle2,
-   AlertTriangle
+   AlertTriangle,
+   Square
 } from 'lucide-react'
-import { getBookings } from '@/actions/bookings'
-import { approveReturn } from '@/actions/admin'
+import { completeBooking, getBookings } from '@/actions/bookings'
 import { Card, CardContent } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
 
 export default function BookingManagement() {
    const [bookings, setBookings] = useState<any[]>([])
    const [loading, setLoading] = useState(true)
-   const [filter, setFilter] = useState('returned')
+   const [filter, setFilter] = useState('active')
    const [processingId, setProcessingId] = useState<string | null>(null)
 
-   useEffect(() => {
-      const fetchBookings = async () => {
-         setLoading(true)
-         const res = await getBookings({ status: filter === 'all' ? undefined : filter === 'expired' ? 'returned' : filter === 'returned' ? 'completed' : filter })
-         if (res.success) setBookings(res.data.documents)
-         setLoading(false)
-      }
-      fetchBookings()
+   const loadBookings = useCallback(async () => {
+      setLoading(true)
+      const res = await getBookings({ status: filter === 'all' ? undefined : filter })
+      if (res.success) setBookings(res.data.documents)
+      else alert(res.error)
+      setLoading(false)
    }, [filter])
 
-   const handleApprove = async (id: string) => {
+   useEffect(() => {
+      loadBookings()
+   }, [loadBookings])
+
+   const handleEndBooking = async (id: string) => {
+      if (!confirm('End this booking and restore issued equipment?')) return
       setProcessingId(id)
-      const res = await approveReturn(id)
-      if (res.success) {
-         setBookings(bookings.map(b => b.id === id ? { ...b, status: 'expired' } : b))
-      } else {
-         alert(res.error)
-      }
+      const res = await completeBooking(id)
+      if (res.success) await loadBookings()
+      else alert(res.error)
       setProcessingId(null)
    }
 
@@ -56,7 +56,7 @@ export default function BookingManagement() {
             </div>
 
             <div className="flex bg-dark p-1 rounded-lg border border-border shadow-sm">
-               {['returned', 'active', 'expired', 'all'].map((f) => (
+               {['active', 'expired', 'completed', 'all'].map((f) => (
                   <button
                      key={f}
                      onClick={() => setFilter(f)}
@@ -83,7 +83,7 @@ export default function BookingManagement() {
                            <div className="flex flex-col lg:flex-row gap-8">
                               <div className="flex-1 space-y-8">
                                  <div className="flex items-center gap-4">
-                                    <div className={`px-3 py-1 rounded-md text-xs font-bold uppercase border shadow-sm ${b.status === 'returned' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
+                                    <div className={`px-3 py-1 rounded-md text-xs font-bold uppercase border shadow-sm ${b.status === 'expired' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
                                        b.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
                                           'bg-primary text-primary-foreground border-border'
                                        }`}>
@@ -142,7 +142,7 @@ export default function BookingManagement() {
                               </div>
 
                               <div className="shrink-0 w-full lg:w-72 flex flex-col justify-center items-center lg:border-l border-border lg:pl-8 pt-8 lg:pt-0">
-                                 {b.status === 'returned' ? (
+                                 {b.status === 'expired' ? (
                                     <div className="w-full space-y-4">
                                        <div className="p-6 bg-amber-500/10 border border-amber-500/20 rounded-xl flex flex-col items-center text-center gap-3">
                                           <div className="text-amber-500">
@@ -150,21 +150,35 @@ export default function BookingManagement() {
                                           </div>
                                           <div>
                                              <p className="text-sm font-bold text-amber-500">Approval Required</p>
-                                             <p className="text-xs text-amber-500/80 font-medium mt-1">Pending return verification</p>
+                                             <p className="text-xs text-amber-500/80 font-medium mt-1">Booking time ended</p>
                                           </div>
                                        </div>
                                        <Button
                                           className="w-full py-6 text-sm font-semibold rounded-xl bg-primary hover:bg-primary/90 text-white border-0 shadow-sm"
-                                          onClick={() => handleApprove(b.id)}
+                                          onClick={() => handleEndBooking(b.id)}
                                           disabled={processingId === b.id}
                                        >
-                                          {processingId === b.id ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : <><CheckCircle2 className="w-5 h-5 mr-2" /> Approve & Restore</>}
+                                          {processingId === b.id ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : <><CheckCircle2 className="w-5 h-5 mr-2" /> End Booking</>}
                                        </Button>
                                     </div>
                                  ) : b.status === 'active' ? (
-                                    <div className="flex flex-col items-center gap-6 py-10 opacity-40 group-hover:opacity-100 transition-opacity duration-700">
-
-
+                                    <div className="w-full space-y-4">
+                                       <div className="p-6 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex flex-col items-center text-center gap-3">
+                                          <div className="text-emerald-500">
+                                             <Clock className="w-6 h-6" />
+                                          </div>
+                                          <div>
+                                             <p className="text-sm font-bold text-emerald-500">Active Booking</p>
+                                             <p className="text-xs text-emerald-500/80 font-medium mt-1">End this session</p>
+                                          </div>
+                                       </div>
+                                       <Button
+                                          className="w-full py-6 text-sm font-semibold rounded-xl bg-primary hover:bg-primary/90 text-white border-0 shadow-sm"
+                                          onClick={() => handleEndBooking(b.id)}
+                                          disabled={processingId === b.id}
+                                       >
+                                          {processingId === b.id ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : <><Square className="w-5 h-5 mr-2" /> End Booking</>}
+                                       </Button>
                                     </div>
                                  ) : (
                                     <div className="flex flex-col items-center gap-6 py-10 opacity-30">
