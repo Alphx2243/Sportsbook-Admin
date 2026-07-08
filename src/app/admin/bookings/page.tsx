@@ -19,7 +19,7 @@ import Button from '@/components/ui/Button'
 export default function BookingManagement() {
    const [bookings, setBookings] = useState<any[]>([])
    const [loading, setLoading] = useState(true)
-   const [filter, setFilter] = useState('active')
+   const [filter, setFilter] = useState('returned')
    const [processingId, setProcessingId] = useState<string | null>(null)
 
    const loadBookings = useCallback(async () => {
@@ -35,7 +35,7 @@ export default function BookingManagement() {
    }, [loadBookings])
 
    const handleEndBooking = async (id: string) => {
-      if (!confirm('End this booking and restore issued equipment?')) return
+      if (!confirm('Approve equipment return and complete this booking?')) return
       setProcessingId(id)
       const res = await completeBooking(id)
       if (res.success) await loadBookings()
@@ -56,7 +56,7 @@ export default function BookingManagement() {
             </div>
 
             <div className="flex bg-dark p-1 rounded-lg border border-border shadow-sm">
-               {['active', 'expired', 'completed', 'all'].map((f) => (
+               {['returned', 'active', 'expired', 'completed', 'all'].map((f) => (
                   <button
                      key={f}
                      onClick={() => setFilter(f)}
@@ -83,7 +83,7 @@ export default function BookingManagement() {
                            <div className="flex flex-col lg:flex-row gap-8">
                               <div className="flex-1 space-y-8">
                                  <div className="flex items-center gap-4">
-                                    <div className={`px-3 py-1 rounded-md text-xs font-bold uppercase border shadow-sm ${b.status === 'expired' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
+                                    <div className={`px-3 py-1 rounded-md text-xs font-bold uppercase border shadow-sm ${b.status === 'returned' || b.status === 'expired' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
                                        b.status === 'active' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
                                           'bg-primary text-primary-foreground border-border'
                                        }`}>
@@ -142,7 +142,7 @@ export default function BookingManagement() {
                               </div>
 
                               <div className="shrink-0 w-full lg:w-72 flex flex-col justify-center items-center lg:border-l border-border lg:pl-8 pt-8 lg:pt-0">
-                                 {b.status === 'expired' ? (
+                                 {b.status === 'returned' || b.status === 'expired' ? (
                                     <div className="w-full space-y-4">
                                        <div className="p-6 bg-amber-500/10 border border-amber-500/20 rounded-xl flex flex-col items-center text-center gap-3">
                                           <div className="text-amber-500">
@@ -150,7 +150,9 @@ export default function BookingManagement() {
                                           </div>
                                           <div>
                                              <p className="text-sm font-bold text-amber-500">Approval Required</p>
-                                             <p className="text-xs text-amber-500/80 font-medium mt-1">Booking time ended</p>
+                                             <p className="text-xs text-amber-500/80 font-medium mt-1">
+                                                {b.status === 'returned' ? 'Verify equipment return' : 'Booking time ended'}
+                                             </p>
                                           </div>
                                        </div>
                                        <Button
@@ -158,7 +160,7 @@ export default function BookingManagement() {
                                           onClick={() => handleEndBooking(b.id)}
                                           disabled={processingId === b.id}
                                        >
-                                          {processingId === b.id ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : <><CheckCircle2 className="w-5 h-5 mr-2" /> End Booking</>}
+                                          {processingId === b.id ? <Loader2 className="w-5 h-5 animate-spin mx-auto" /> : <><CheckCircle2 className="w-5 h-5 mr-2" /> Approve & Complete</>}
                                        </Button>
                                     </div>
                                  ) : b.status === 'active' ? (

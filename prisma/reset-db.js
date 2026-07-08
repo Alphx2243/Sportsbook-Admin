@@ -5,7 +5,12 @@ const { Pool } = require('pg')
 const bcrypt = require('bcryptjs')
 require('dotenv').config()
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL })
+const connectionString = process.env.DATABASE_URL
+if (!connectionString) {
+    throw new Error('DATABASE_URL must be set.')
+}
+
+const pool = new Pool({ connectionString, max: 1 })
 const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 

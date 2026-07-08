@@ -1,7 +1,7 @@
 import { normalizeRole } from '@/lib/roles'
 
 const MATCH_STATUSES = new Set(['live', 'upcoming', 'finished'])
-const BOOKING_STATUSES = new Set(['pending', 'active', 'expired', 'completed'])
+const BOOKING_STATUSES = new Set(['pending', 'active', 'returned', 'expired', 'completed'])
 
 export function requiredString(value: unknown, field: string, maxLength = 255): string {
     if (typeof value !== 'string') throw new Error(`${field} is required.`)

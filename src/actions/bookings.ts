@@ -18,12 +18,12 @@ export async function createBooking(data: any): Promise<ActionResponse> {
             const existingBooking = await tx.booking.findFirst({
                 where: {
                     userId: data.userId,
-                    status: { in: ['pending', 'active', 'expired'] }
+                    status: { in: ['pending', 'active', 'returned', 'expired'] }
                 }
             })
 
             if (existingBooking) {
-                const msg = existingBooking.status === 'active' || existingBooking.status === 'expired'
+                const msg = existingBooking.status === 'active' || existingBooking.status === 'returned' || existingBooking.status === 'expired'
                     ? 'User already has an active booking.'
                     : 'User already has a pending booking.';
                 throw new Error(`${msg} Please complete it before booking again.`)
@@ -276,7 +276,7 @@ export async function completeBooking(bookingId: string): Promise<ActionResponse
         const endedAt = getISTDate()
         await prisma.$transaction(async (tx: any) => {
             const [booking]: any = await tx.$queryRaw`SELECT * FROM "Booking" WHERE "id" = ${bookingId} FOR UPDATE`;
-            if (!booking || (booking.status !== 'active' && booking.status !== 'expired')) {
+            if (!booking || (booking.status !== 'active' && booking.status !== 'returned' && booking.status !== 'expired')) {
                 throw new Error('Booking not found or cannot be completed');
             }
 
@@ -287,9 +287,12 @@ export async function completeBooking(bookingId: string): Promise<ActionResponse
 
             await tx.booking.update({
                 where: { id: bookingId },
-                data: { status: 'completed', endAt: endedAt }
+                data: {
+                    status: 'completed',
+                    endAt: booking.status === 'active' ? endedAt : undefined,
+                }
             });
-            if (booking.status === 'active' || booking.scanned) {
+            if (booking.status === 'active' || booking.status === 'returned' || booking.scanned) {
                 await restoreBookingEquipment(tx, bookingId);
             }
         });
@@ -317,10 +320,10 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
         await ensureAdmin()
         const result = await prisma.$transaction(async (tx: any) => {
             const existingBooking = await tx.booking.findFirst({
-                where: { userId: data.userId, status: { in: ['pending', 'active', 'expired'] } }
+                where: { userId: data.userId, status: { in: ['pending', 'active', 'returned', 'expired'] } }
             })
             if (existingBooking) {
-                const msg = existingBooking.status === 'active' || existingBooking.status === 'expired'
+                const msg = existingBooking.status === 'active' || existingBooking.status === 'returned' || existingBooking.status === 'expired'
                     ? 'You already have an active booking.'
                     : 'You already have a pending booking.';
                 throw new Error(`${msg} Please complete it before booking again.`)
@@ -331,7 +334,7 @@ export async function secureBooking(data: any): Promise<ActionResponse> {
                 throw new Error('Sport not found.')
             }
             const isCapacityBased = sport.maxCapacity && sport.maxCapacity > 0
-            const activeBookings = await tx.booking.findMany({ where: { sportId: sport.id, status: { in: ['pending', 'active'] } } })
+            const activeBookings = await tx.booking.findMany({ where: { sportId: sport.id, status: { in: ['pending', 'active', 'returned'] } } })
             const alreadyBookedPlayers = activeBookings.reduce((sum: number, booking: any) => sum + (booking.numberOfPlayers || 0), 0)
             const numPlayers = positiveInt(data.numberOfPlayers, 'Number of players')
             const courtNo = data.CourtNo

@@ -76,7 +76,7 @@ export function withBookingDisplay(booking: any) {
 }
 
 function normalizeLegacyShiftedActiveBooking(status: string | undefined, startAt: Date | null, endAt: Date | null) {
-    const affectedStatus = status === 'active'
+    const affectedStatus = status === 'active' || status === 'returned'
     const looksShiftedIntoFuture = startAt && startAt.getTime() - Date.now() > 5 * 60 * 1000
     if (!affectedStatus || !looksShiftedIntoFuture) {
         return { displayStartAt: startAt, displayEndAt: endAt }
@@ -167,7 +167,7 @@ export async function syncCourtsForSport(tx: any, sportId: string, numberOfCourt
 
 export async function withSportAvailability(tx: any, sport: any) {
     const activeBookings = await tx.booking.findMany({
-        where: { sportId: sport.id, status: { in: ['pending', 'active'] } },
+        where: { sportId: sport.id, status: { in: ['pending', 'active', 'returned'] } },
         select: { courtId: true, numberOfPlayers: true },
     })
     const occupiedCourtIds = new Set(activeBookings.map((booking: any) => booking.courtId).filter(Boolean))
